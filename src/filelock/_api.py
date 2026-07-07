@@ -9,7 +9,7 @@ import time
 import warnings
 from abc import ABCMeta, abstractmethod
 from dataclasses import dataclass
-from threading import local
+from threading import Lock, local
 from typing import TYPE_CHECKING, Any, TypeVar
 from weakref import WeakValueDictionary
 
@@ -112,6 +112,7 @@ _T = TypeVar("_T", bound="BaseFileLock")
 
 class FileLockMeta(ABCMeta):
     _instances: WeakValueDictionary[str, BaseFileLock]
+    _instances_lock: Lock
 
     def __call__(  # noqa: PLR0913
         cls: type[_T],
@@ -126,38 +127,7 @@ class FileLockMeta(ABCMeta):
         lifetime: float | None = None,
         **kwargs: Any,  # capture remaining kwargs for subclasses  # noqa: ANN401
     ) -> _T:
-        if is_singleton:
-            instance = cls._instances.get(str(lock_file))
-            if instance:
-                params_to_check = {
-                    "thread_local": (thread_local, instance.is_thread_local()),
-                    "timeout": (timeout, instance.timeout),
-                    "mode": (mode, instance._context.mode),  # noqa: SLF001
-                    "blocking": (blocking, instance.blocking),
-                    "poll_interval": (poll_interval, instance.poll_interval),
-                    "lifetime": (lifetime, instance.lifetime),
-                }
-
-                non_matching_params = {
-                    name: (passed_param, set_param)
-                    for name, (passed_param, set_param) in params_to_check.items()
-                    if passed_param != set_param
-                }
-                if not non_matching_params:
-                    return instance  # ty: ignore[invalid-return-type]  # https://github.com/astral-sh/ty/issues/3231
-
-                # parameters do not match; raise error
-                msg = "Singleton lock instances cannot be initialized with differing arguments"
-                msg += "\nNon-matching arguments: "
-                for param_name, (passed_param, set_param) in non_matching_params.items():
-                    msg += f"\n\t{param_name} (existing lock has {set_param} but {passed_param} was passed)"
-                raise ValueError(msg)
-
-        # Workaround to make `__init__`'s params optional in subclasses
-        # E.g. virtualenv changes the signature of the `__init__` method in the `BaseFileLock` class descendant
-        # (https://github.com/tox-dev/filelock/pull/340)
-
-        all_params = {
+        params = {
             "timeout": timeout,
             "mode": mode,
             "thread_local": thread_local,
@@ -167,16 +137,50 @@ class FileLockMeta(ABCMeta):
             "lifetime": lifetime,
             **kwargs,
         }
+        if not is_singleton:
+            return cls._create_instance(lock_file, params)
 
+        # Look up, build and store under one lock. Without it two threads racing the first construction for a
+        # path both miss the cache and each build their own instance, so callers relying on is_singleton for
+        # reentrant locking across instances end up with two "singletons" and acquire()'s deadlock check then
+        # rejects a legitimate reentrant acquire; the unguarded writes to the WeakValueDictionary are a data
+        # race besides. ReadWriteLock and SoftReadWriteLock already guard their singleton caches this way.
+        with cls._instances_lock:
+            if (instance := cls._instances.get(str(lock_file))) is None:
+                instance = cls._create_instance(lock_file, params)
+                cls._instances[str(lock_file)] = instance
+                return instance
+
+        params_to_check = {
+            "thread_local": (thread_local, instance.is_thread_local()),
+            "timeout": (timeout, instance.timeout),
+            "mode": (mode, instance._context.mode),  # noqa: SLF001
+            "blocking": (blocking, instance.blocking),
+            "poll_interval": (poll_interval, instance.poll_interval),
+            "lifetime": (lifetime, instance.lifetime),
+        }
+
+        non_matching_params = {
+            name: (passed_param, set_param)
+            for name, (passed_param, set_param) in params_to_check.items()
+            if passed_param != set_param
+        }
+        if not non_matching_params:
+            return instance  # ty: ignore[invalid-return-type]  # https://github.com/astral-sh/ty/issues/3231
+
+        # parameters do not match; raise error
+        msg = "Singleton lock instances cannot be initialized with differing arguments"
+        msg += "\nNon-matching arguments: "
+        for param_name, (passed_param, set_param) in non_matching_params.items():
+            msg += f"\n\t{param_name} (existing lock has {set_param} but {passed_param} was passed)"
+        raise ValueError(msg)
+
+    def _create_instance(cls: type[_T], lock_file: str | os.PathLike[str], params: dict[str, Any]) -> _T:
+        # Keep only the params this subclass's __init__ accepts: virtualenv narrows the signature of its
+        # BaseFileLock descendant, so passing the full set would break it (https://github.com/tox-dev/filelock/pull/340).
         present_params = inspect.signature(cls.__init__).parameters
-        init_params = {key: value for key, value in all_params.items() if key in present_params}
-
-        instance = super().__call__(lock_file, **init_params)
-
-        if is_singleton:
-            cls._instances[str(lock_file)] = instance
-
-        return instance
+        init_params = {key: value for key, value in params.items() if key in present_params}
+        return super().__call__(lock_file, **init_params)
 
 
 class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):
@@ -190,11 +194,16 @@ class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):
     """
 
     _instances: WeakValueDictionary[str, BaseFileLock]
+    _instances_lock: Lock
+
+    #: How the cross-instance deadlock message names the conflicting holder; the async subclass says "task".
+    _deadlock_holder_desc: str = "FileLock instance in this thread"
 
     def __init_subclass__(cls, **kwargs: dict[str, Any]) -> None:
         """Setup unique state for lock subclasses."""
         super().__init_subclass__(**kwargs)
         cls._instances = WeakValueDictionary()
+        cls._instances_lock = Lock()
 
     def __init__(  # noqa: PLR0913
         self,
@@ -346,7 +355,17 @@ class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):
 
         :param value: the new value in seconds, or ``None`` to disable expiration
 
+        :raises ValueError: if *value* is a negative number
+        :raises TypeError: if *value* is not ``None`` and not a real number
+
         """
+        if value is not None:
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                msg = f"lifetime must be a non-negative number or None, not {type(value).__name__}"
+                raise TypeError(msg)
+            if value < 0:
+                msg = f"lifetime must be non-negative, not {value!r}"
+                raise ValueError(msg)
         self._context.lifetime = value
 
     @property
@@ -487,19 +506,8 @@ class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):
         # Increment the number right at the beginning. We can still undo it, if something fails.
         self._context.lock_counter += 1
 
-        lock_id = id(self)
-        lock_filename = self.lock_file
-        canonical = _canonical(lock_filename)
-
-        would_block = self._context.lock_counter == 1 and not self.is_locked and timeout < 0 and blocking
-        if would_block and (existing := _registry.held.get(canonical)) is not None and existing != lock_id:
-            self._context.lock_counter -= 1
-            msg = (
-                f"Deadlock: lock '{lock_filename}' is already held by a different "
-                f"FileLock instance in this thread. Use is_singleton=True to "
-                f"enable reentrant locking across instances."
-            )
-            raise RuntimeError(msg)
+        canonical = _canonical(self.lock_file)
+        self._raise_if_would_deadlock(canonical, timeout=timeout, blocking=blocking)
 
         start_time = time.perf_counter()
         try:
@@ -511,13 +519,41 @@ class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):
                 start_time=start_time,
             )
         except BaseException:
-            self._context.lock_counter = max(0, self._context.lock_counter - 1)
-            if self._context.lock_counter == 0:
-                _registry.held.pop(canonical, None)
+            self._undo_acquire(canonical)
             raise
-        if self._context.lock_counter == 1:
-            _registry.held[canonical] = lock_id
+        self._commit_acquire(canonical)
         return AcquireReturnProxy(lock=self)
+
+    def _raise_if_would_deadlock(self, canonical: str, *, timeout: float, blocking: bool) -> None:
+        """
+        Fail fast when a *different* live instance already holds this path on the current thread/task.
+
+        Only the first, indefinitely-blocking acquire can self-deadlock this way: waiting in the OS primitive would
+        block on a lock this thread already owns. A finite timeout or ``blocking=False`` keeps the normal Timeout path.
+        """
+        would_block = self._context.lock_counter == 1 and not self.is_locked and timeout < 0 and blocking
+        if would_block and _registry.held.get(canonical) not in {None, id(self)}:
+            self._context.lock_counter -= 1
+            msg = (
+                f"Deadlock: lock '{self.lock_file}' is already held by a different {self._deadlock_holder_desc}. "
+                f"Use is_singleton=True to enable reentrant locking across instances."
+            )
+            raise RuntimeError(msg)
+
+    def _undo_acquire(self, canonical: str) -> None:
+        """Roll back the counter after a failed acquire, dropping the registry entry once nothing holds the path."""
+        self._context.lock_counter = max(0, self._context.lock_counter - 1)
+        if self._context.lock_counter == 0:
+            _registry.held.pop(canonical, None)
+
+    def _commit_acquire(self, canonical: str) -> None:
+        """Record this instance as the holder once the first acquire succeeds, so peers can detect the deadlock."""
+        if self._context.lock_counter == 1:
+            _registry.held[canonical] = id(self)
+
+    def _drop_registry_entry(self) -> None:
+        """Forget this path's holder on release so a later cross-instance acquire is not misread as a deadlock."""
+        _registry.held.pop(_canonical(self.lock_file), None)
 
     def _poll_until_acquired(
         self,
@@ -568,7 +604,7 @@ class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):
                 _LOGGER.debug("Attempting to release lock %s on %s", lock_id, lock_filename)
                 self._release()
                 self._context.lock_counter = 0
-                _registry.held.pop(_canonical(lock_filename), None)
+                self._drop_registry_entry()
                 _LOGGER.debug("Lock %s released on %s", lock_id, lock_filename)
 
     def __enter__(self) -> Self:

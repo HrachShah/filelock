@@ -5,9 +5,10 @@ import logging
 import os
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from errno import ENOSYS
+from errno import EAGAIN, ENOSYS, EWOULDBLOCK
 from inspect import getframeinfo, stack
 from pathlib import Path, PurePath
 from stat import S_IWGRP, S_IWOTH, S_IWUSR, filemode
@@ -835,6 +836,32 @@ def test_singleton_locks_are_the_same(lock_type: type[BaseFileLock], tmp_path: P
     assert lock_2 is lock_1
 
 
+def test_singleton_locks_survive_concurrent_first_construction(tmp_path: Path) -> None:
+    # Two threads constructing the same is_singleton=True lock at once must still share one instance. A slow
+    # __init__ widens the window between the cache miss and the store so the race is hit deterministically.
+    lock_path = tmp_path / "a"
+
+    class _SlowLock(SoftFileLock):
+        def __init__(self, lock_file: str, *, is_singleton: bool = True) -> None:
+            time.sleep(0.05)
+            super().__init__(lock_file, is_singleton=is_singleton)
+
+    results: list[BaseFileLock] = []
+    barrier = threading.Barrier(2)
+
+    def build() -> None:
+        barrier.wait()
+        results.append(_SlowLock(str(lock_path), is_singleton=True))
+
+    threads = [threading.Thread(target=build) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert results[0] is results[1]
+
+
 @pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
 def test_singleton_locks_are_distinct_per_lock_file(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
     lock_path_1 = tmp_path / "a"
@@ -924,28 +951,23 @@ def test_file_lock_positional_argument(tmp_path: Path) -> None:
     assert lock.lock_file == str(lock_path) + ".lock"
 
 
-@pytest.mark.parametrize(
-    ("lock_type", "expected_exc"),
-    [
-        (SoftFileLock, TimeoutError),
-        (FileLock, TimeoutError) if sys.platform == "win32" else (FileLock, PermissionError),
-    ],
-)
-def test_mtime_zero_exit_branch(
-    lock_type: type[BaseFileLock], expected_exc: type[BaseException], tmp_path: Path
-) -> None:
+@pytest.mark.skipif(sys.platform != "win32" and os.geteuid() == 0, reason="root can open a 0o444 file for writing")
+@pytest.mark.parametrize("lock_type", [SoftFileLock, FileLock])
+def test_readonly_lock_file_with_mtime_zero_raises(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
+    # A read-only lock file whose mtime is 0 must still be rejected: acquire() no longer short-circuits the
+    # writability check on mtime == 0, so it reports the file can never be opened for writing.
     lock_path = tmp_path / "z.lock"
     lock_path.touch()
-    Path(lock_path).chmod(0o444)
+    lock_path.chmod(0o444)
     os.utime(lock_path, (0, 0))
+    try:
+        with pytest.raises(PermissionError):
+            lock_type(str(lock_path)).acquire(timeout=0)
+    finally:
+        lock_path.chmod(0o644)
 
-    lock = lock_type(str(lock_path))
 
-    with pytest.raises(expected_exc):
-        lock.acquire(timeout=0)
-
-
-@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+@pytest.mark.parametrize("lock_type", [SoftFileLock])
 def test_lock_file_removed_after_release(tmp_path: Path, lock_type: type[BaseFileLock]) -> None:
     lock_path = tmp_path / "test.lock"
     lock = lock_type(str(lock_path))
@@ -955,7 +977,7 @@ def test_lock_file_removed_after_release(tmp_path: Path, lock_type: type[BaseFil
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Unix flock semantics")
-def test_concurrent_acquire_release_removes_lock_file(tmp_path: Path) -> None:
+def test_concurrent_acquire_release_keeps_lock_file(tmp_path: Path) -> None:
     lock_path = tmp_path / "test.lock"
     errors: list[Exception] = []
 
@@ -974,11 +996,11 @@ def test_concurrent_acquire_release_removes_lock_file(tmp_path: Path) -> None:
     for thread in threads:
         thread.join(timeout=30)
     assert not errors, errors
-    assert not lock_path.exists()
+    assert lock_path.exists()
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Unix flock semantics")
-def test_lock_acquired_after_release_unlinks(tmp_path: Path) -> None:
+def test_lock_acquired_after_release_keeps_path(tmp_path: Path) -> None:
     lock_path = tmp_path / "test.lock"
     first = FileLock(str(lock_path), is_singleton=False)
     second = FileLock(str(lock_path), is_singleton=False)
@@ -986,12 +1008,39 @@ def test_lock_acquired_after_release_unlinks(tmp_path: Path) -> None:
     first.acquire()
     assert lock_path.exists()
     first.release()
-    assert not lock_path.exists()
+    assert lock_path.exists()
 
     second.acquire()
     assert lock_path.exists()
     second.release()
-    assert not lock_path.exists()
+    assert lock_path.exists()
+
+
+def test_waiter_fd_cannot_split_lock_after_release(tmp_path: Path) -> None:
+    if sys.platform == "win32":  # pragma: win32 cover  # Unix flock semantics; also narrows fcntl for the type checker
+        return
+    import fcntl
+
+    lock_path = tmp_path / "test.lock"
+    first = FileLock(str(lock_path), is_singleton=False)
+    replacement = FileLock(str(lock_path), is_singleton=False)
+
+    first.acquire()
+    waiter_fd = os.open(lock_path, os.O_RDWR)
+
+    try:
+        first.release()
+        assert lock_path.exists()
+
+        replacement.acquire()
+        try:
+            with pytest.raises(BlockingIOError) as exc_info:
+                fcntl.flock(waiter_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            assert exc_info.value.errno in {EAGAIN, EWOULDBLOCK}
+        finally:
+            replacement.release()
+    finally:
+        os.close(waiter_fd)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Unix flock semantics")
@@ -1187,3 +1236,127 @@ def test_filenotfound_on_fuse_nfs_retries(tmp_path: Path, mocker: MockerFixture)
     # First call failed with ENOENT, retry succeeded
     assert call_count >= 2
     lock.release()
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+def test_same_thread_different_instances_raises(tmp_path: Path, lock_type: type[BaseFileLock]) -> None:
+    lock_path = tmp_path / "test.lock"
+    lock1 = lock_type(lock_path)
+    with lock1:
+        lock2 = lock_type(lock_path)
+        with pytest.raises(RuntimeError, match="Deadlock"):
+            lock2.acquire()
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+def test_finite_timeout_gives_timeout_not_deadlock(tmp_path: Path, lock_type: type[BaseFileLock]) -> None:
+    lock_path = tmp_path / "test.lock"
+    lock1 = lock_type(lock_path)
+    with lock1:
+        lock2 = lock_type(lock_path, timeout=0.1)
+        with pytest.raises(Timeout):
+            lock2.acquire()
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+def test_non_blocking_gives_timeout_not_deadlock(tmp_path: Path, lock_type: type[BaseFileLock]) -> None:
+    lock_path = tmp_path / "test.lock"
+    lock1 = lock_type(lock_path)
+    with lock1:
+        lock2 = lock_type(lock_path, blocking=False)
+        with pytest.raises(Timeout):
+            lock2.acquire()
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+def test_different_paths_no_conflict(tmp_path: Path, lock_type: type[BaseFileLock]) -> None:
+    lock1 = lock_type(tmp_path / "a.lock")
+    lock2 = lock_type(tmp_path / "b.lock")
+    with lock1, lock2:
+        assert lock1.is_locked
+        assert lock2.is_locked
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+def test_same_instance_reentrant_works(tmp_path: Path, lock_type: type[BaseFileLock]) -> None:
+    lock = lock_type(tmp_path / "test.lock")
+    with lock:
+        with lock:
+            assert lock.is_locked
+        assert lock.is_locked
+    assert not lock.is_locked
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+def test_singleton_avoids_deadlock(tmp_path: Path, lock_type: type[BaseFileLock]) -> None:
+    lock_path = tmp_path / "test.lock"
+    lock1 = lock_type(lock_path, is_singleton=True)
+    with lock1:
+        lock2 = lock_type(lock_path, is_singleton=True)
+        assert lock1 is lock2
+        with lock2:
+            assert lock2.is_locked
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+def test_different_threads_no_false_positive(tmp_path: Path, lock_type: type[BaseFileLock]) -> None:
+    lock_path = tmp_path / "test.lock"
+    lock1 = lock_type(lock_path, timeout=0)
+    lock1.acquire()
+
+    error: BaseException | None = None
+
+    def acquire_in_thread() -> None:
+        nonlocal error
+        lock2 = lock_type(lock_path, timeout=0)
+        try:
+            lock2.acquire()
+        except BaseException as exc:
+            error = exc
+
+    thread = threading.Thread(target=acquire_in_thread)
+    thread.start()
+    thread.join()
+    lock1.release()
+
+    assert not isinstance(error, RuntimeError), "Should not raise RuntimeError in different thread"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="unix-only symlink test")
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+def test_symlink_same_canonical_path(tmp_path: Path, lock_type: type[BaseFileLock]) -> None:
+    lock_path = tmp_path / "test.lock"
+    symlink_path = tmp_path / "link.lock"
+    symlink_path.symlink_to(lock_path)
+
+    lock1 = lock_type(lock_path)
+    with lock1:
+        lock2 = lock_type(symlink_path)
+        with pytest.raises(RuntimeError, match="Deadlock"):
+            lock2.acquire()
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+def test_deadlock_registry_cleanup_on_release(tmp_path: Path, lock_type: type[BaseFileLock]) -> None:
+    lock_path = tmp_path / "test.lock"
+    lock1 = lock_type(lock_path)
+    lock1.acquire()
+    lock1.release()
+
+    lock2 = lock_type(lock_path)
+    with lock2:
+        assert lock2.is_locked
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+def test_force_release_cleans_registry(tmp_path: Path, lock_type: type[BaseFileLock]) -> None:
+    lock_path = tmp_path / "test.lock"
+    lock1 = lock_type(lock_path)
+    with lock1:
+        lock1.acquire()
+        assert lock1.lock_counter == 2
+    lock1.release(force=True)
+
+    lock2 = lock_type(lock_path)
+    with lock2:
+        assert lock2.is_locked

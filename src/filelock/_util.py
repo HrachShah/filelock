@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 import stat
 import sys
 from errno import EACCES, EISDIR
@@ -28,17 +29,20 @@ def raise_on_not_writable_file(filename: str) -> None:
     except OSError:
         return  # swallow does not exist or other errors
 
-    if file_stat.st_mtime != 0:  # if os.stat returns but modification is zero that's an invalid os.stat - ignore it
-        if not (file_stat.st_mode & stat.S_IWUSR):
-            raise PermissionError(EACCES, "Permission denied", filename)
+    # No mtime guard: the old `if st_mtime != 0` skip existed for very old NFS/Linux quirks where os.lstat could
+    # return an all-zero struct, which it never does today for a file that exists. Skipping the checks when mtime
+    # happened to be 0 let a read-only file or a directory in the lock path pass as missing, so acquire() then
+    # blocked forever waiting on an open that cannot succeed (or locked a file nothing else can write).
+    if not (file_stat.st_mode & stat.S_IWUSR):
+        raise PermissionError(EACCES, "Permission denied", filename)
 
-        if stat.S_ISDIR(file_stat.st_mode):
-            if sys.platform == "win32":  # pragma: win32 cover
-                # On Windows, this is PermissionError
-                raise PermissionError(EACCES, "Permission denied", filename)
-            else:  # pragma: win32 no cover # noqa: RET506
-                # On linux / macOS, this is IsADirectoryError
-                raise IsADirectoryError(EISDIR, "Is a directory", filename)
+    if stat.S_ISDIR(file_stat.st_mode):
+        if sys.platform == "win32":  # pragma: win32 cover
+            # On Windows, this is PermissionError
+            raise PermissionError(EACCES, "Permission denied", filename)
+        else:  # pragma: win32 no cover # noqa: RET506
+            # On linux / macOS, this is IsADirectoryError
+            raise IsADirectoryError(EISDIR, "Is a directory", filename)
 
 
 def ensure_directory_exists(filename: Path | str) -> None:
@@ -65,6 +69,12 @@ def break_lock_file(lock_file: str, mtime_before: float, ino_before: int) -> Non
     be unlinked; the inode is the reliable identity, mirroring the token re-check in the soft read/write marker break.
     ``lstat`` is used so a hostile symlink swapped in after the decision is not followed.
 
+    The break name carries a random token so it is unguessable and unique per attempt. Without it two breakers in the
+    same process share ``<lock>.break.<pid>``, and a second break can rename a freshly recreated live lock onto that
+    path in the window between the re-verify ``lstat`` above and the ``unlink`` below, so we would delete a live lock
+    the inode check just approved. A private name means nobody else can target our break path, matching the soft
+    read/write marker break.
+
     :param lock_file: path to the lock file to break.
     :param mtime_before: modification time observed when the lock was judged stale.
     :param ino_before: inode number observed when the lock was judged stale.
@@ -72,7 +82,7 @@ def break_lock_file(lock_file: str, mtime_before: float, ino_before: int) -> Non
     :raises OSError: if the rename fails (e.g. the file vanished or is not owned in a sticky directory).
 
     """
-    break_path = f"{lock_file}.break.{os.getpid()}"
+    break_path = f"{lock_file}.break.{os.getpid()}.{secrets.token_hex(16)}"
     Path(lock_file).rename(break_path)
     try:
         st_after = os.lstat(break_path)

@@ -68,6 +68,30 @@ def test_break_lock_file_missing_source_raises(tmp_path: Path) -> None:
         break_lock_file(str(tmp_path / "nope.lock"), 0.0, 0)
 
 
+def test_break_lock_file_break_path_not_targetable_by_a_peer(tmp_path: Path, mocker: MockerFixture) -> None:
+    lock = tmp_path / "test.lock"
+    lock.write_text("stale", encoding="utf-8")
+    st = os.lstat(lock)
+
+    # A second breaker in the same process independently computes this name (no random token). If break_lock_file
+    # used it too, the peer could rename a freshly recreated live lock onto our break path in the window between the
+    # re-verify lstat and the unlink, and we would delete a live lock the inode check just approved.
+    predictable = tmp_path / f"test.lock.break.{os.getpid()}"
+    real_lstat = os.lstat
+
+    def lstat_hook(path: str) -> os.stat_result:
+        result = real_lstat(path)
+        if ".break." in path and not predictable.exists():  # once: the peer recreates a live lock at its own name
+            lock.write_text("live", encoding="utf-8")
+            lock.rename(predictable)
+        return result
+
+    mocker.patch("filelock._util.os.lstat", side_effect=lstat_hook)
+    break_lock_file(str(lock), st.st_mtime, st.st_ino)
+
+    assert predictable.read_text(encoding="utf-8") == "live"
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="symlink-to-dir raises IsADirectoryError only on Unix")
 def test_raise_on_not_writable_file_does_not_follow_symlink_to_dir(tmp_path: Path) -> None:
     target = tmp_path / "targetdir"
@@ -116,3 +140,30 @@ def test_raise_on_not_writable_file_still_rejects_readonly_file(tmp_path: Path) 
             raise_on_not_writable_file(str(path))
     finally:
         path.chmod(0o644)
+
+
+# raise_on_not_writable_file no longer short-circuits on mtime == 0 (the old `if st_mtime != 0` guard existed for
+# very old NFS/Linux quirks where os.lstat could return an all-zero struct; it can't today). Writability is
+# independent of mtime, so both an mtime of 0 and a far-future mtime must still reject a read-only file — the
+# latter case pins that a later patch can't narrow the check to one mtime range. The verdict is mode-based, not
+# access-based, so it holds regardless of euid (no root skip, unlike the acquire-level test in test_filelock.py).
+@pytest.mark.parametrize("mtime", [0, 2_000_000_000], ids=["mtime-zero", "mtime-future"])
+def test_raise_on_not_writable_file_rejects_readonly_file_any_mtime(tmp_path: Path, mtime: int) -> None:
+    path = tmp_path / "ro.lock"
+    path.write_text("x", encoding="utf-8")
+    path.chmod(0o444)
+    try:
+        os.utime(path, (mtime, mtime))
+        with pytest.raises(PermissionError):
+            raise_on_not_writable_file(str(path))
+    finally:
+        path.chmod(0o644)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="a real directory raises PermissionError on Windows")
+def test_raise_on_not_writable_file_rejects_directory_with_mtime_zero(tmp_path: Path) -> None:
+    path = tmp_path / "a_dir"
+    path.mkdir()
+    os.utime(path, (0, 0))
+    with pytest.raises(IsADirectoryError):
+        raise_on_not_writable_file(str(path))
