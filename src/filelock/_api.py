@@ -296,6 +296,9 @@ class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):
         :param value: the new value, in seconds
 
         """
+        if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+            msg = f"timeout must be a non-negative number or None, not {type(value).__name__}"
+            raise TypeError(msg)
         self._context.timeout = float(value)
 
     @property

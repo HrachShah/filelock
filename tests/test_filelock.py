@@ -429,6 +429,19 @@ def test_default_timeout(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+def test_timeout_setter_rejects_bool(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
+    # bool is an int subclass; without the guard, lock.timeout = True would
+    # silently turn into 1.0 second and lock.timeout = False into 0.0 seconds
+    # (meaning "give up immediately on every acquire"). Reject bool the same
+    # way the lifetime setter does so the misconfiguration surfaces at
+    # assignment time rather than on the first lock attempt.
+    lock = lock_type(str(tmp_path / "a"))
+    with pytest.raises(TypeError, match="timeout must be"):
+        lock.timeout = True  # ty: ignore[invalid-assignment]
+    with pytest.raises(TypeError, match="timeout must be"):
+        lock.timeout = False  # ty: ignore[invalid-assignment]
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
 def test_context_release_on_exc(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
     # lock is released when an exception is thrown in a with-statement
     lock_path = tmp_path / "a"
