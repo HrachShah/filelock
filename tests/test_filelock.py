@@ -1359,3 +1359,36 @@ def test_force_release_cleans_registry(tmp_path: Path, lock_type: type[BaseFileL
     lock2 = lock_type(lock_path)
     with lock2:
         assert lock2.is_locked
+
+
+def test_release_force_on_unacquired_lock_is_noop(tmp_path: Path) -> None:
+    """``release(force=True)`` on a lock the caller never acquired must be a
+    no-op rather than falling through to ``_release`` and crashing on
+    ``os.close(None)`` / ``fstat(None)``.
+
+    ``BaseFileLock.__del__`` unconditionally calls ``self.release(force=True)``,
+    so this path is hit every time a lock object is garbage-collected without
+    having been acquired — a common pattern when constructing a lock inside a
+    function that exits via an exception before the ``with`` statement runs.
+    """
+    lock = FileLock(tmp_path / "test.lock")
+    # ``lock_file_fd`` is None until the first ``acquire``.
+    assert lock._context.lock_file_fd is None
+    assert not lock.is_locked
+    # Must not raise under either normal or ``python -O`` execution.
+    lock.release(force=True)
+    assert not lock.is_locked
+    assert lock._context.lock_file_fd is None
+
+
+def test_release_force_on_never_acquired_acquire_return_proxy_is_noop(tmp_path: Path) -> None:
+    """``AcquireReturnProxy`` exposes ``release`` to user code as a convenience
+    for inverting ``acquire``. When the lock was never acquired, releasing it
+    must be a no-op rather than a TypeError from ``os.close(None)``.
+    """
+    lock = FileLock(tmp_path / "test.lock")
+    with lock.acquire() as _proxy:
+        pass
+    # After a normal with-block, ``is_locked`` is False again; calling
+    # ``release(force=True)`` on the proxy a second time must be a no-op.
+    _proxy.release(force=True)

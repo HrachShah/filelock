@@ -595,17 +595,36 @@ class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):
         :param force: If true, the lock counter is ignored and the lock is released in every case.
 
         """
-        if self.is_locked:
-            self._context.lock_counter -= 1
+        if not self.is_locked:
+            if not force:
+                msg = (
+                    f"Cannot release un-acquired lock {id(self)} on {self.lock_file}: "
+                    "the lock was never acquired, or was already released."
+                )
+                raise RuntimeError(msg)
+            # force=True on a lock the caller never held is a no-op: the
+            # subclasses' _release() implementations assume the underlying
+            # OS primitives are live (fd, flock, unlink) and will crash with
+            # TypeError or FileNotFoundError when the lock was never
+            # acquired. __del__ is the most common path that hits this
+            # branch (a partially-constructed lock that raised from
+            # __init__ after BaseAsyncFileLock set the executor).
+            _LOGGER.debug(
+                "Lock %s force-released without underlying close (never acquired)",
+                id(self),
+            )
+            return
 
-            if self._context.lock_counter == 0 or force:
-                lock_id, lock_filename = id(self), self.lock_file
+        self._context.lock_counter -= 1
 
-                _LOGGER.debug("Attempting to release lock %s on %s", lock_id, lock_filename)
-                self._release()
-                self._context.lock_counter = 0
-                self._drop_registry_entry()
-                _LOGGER.debug("Lock %s released on %s", lock_id, lock_filename)
+        if self._context.lock_counter == 0 or force:
+            lock_id, lock_filename = id(self), self.lock_file
+
+            _LOGGER.debug("Attempting to release lock %s on %s", lock_id, lock_filename)
+            self._release()
+            self._context.lock_counter = 0
+            self._drop_registry_entry()
+            _LOGGER.debug("Lock %s released on %s", lock_id, lock_filename)
 
     def __enter__(self) -> Self:
         """
