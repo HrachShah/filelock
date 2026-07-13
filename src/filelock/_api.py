@@ -289,13 +289,17 @@ class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):
         return self._context.timeout
 
     @timeout.setter
-    def timeout(self, value: float | str) -> None:
+    def timeout(self, value: float) -> None:
         """
         Change the default timeout value.
 
         :param value: the new value, in seconds
 
+        :raises TypeError: if *value* is not a real number (a bool, ``None``, a string, a container, etc.)
         """
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            msg = f"timeout must be a number, not {type(value).__name__}"
+            raise TypeError(msg)
         self._context.timeout = float(value)
 
     @property

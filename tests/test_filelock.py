@@ -1359,3 +1359,27 @@ def test_force_release_cleans_registry(tmp_path: Path, lock_type: type[BaseFileL
     lock2 = lock_type(lock_path)
     with lock2:
         assert lock2.is_locked
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+@pytest.mark.parametrize("bad_value", [True, False, None, "abc", [1, 2], {"a": 1}, (1, 2), {1, 2}])
+def test_timeout_setter_rejects_non_numeric(lock_type: type[BaseFileLock], bad_value: object, tmp_path: Path) -> None:
+    lock = lock_type(str(tmp_path / "a"))
+    with pytest.raises(TypeError, match="timeout must be"):
+        lock.timeout = bad_value  # type: ignore[invalid-assignment]
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+@pytest.mark.parametrize("good_value", [0, 1, 0.5, 1.5, 10, 0.1])
+def test_timeout_setter_accepts_numeric(lock_type: type[BaseFileLock], good_value: float, tmp_path: Path) -> None:
+    lock = lock_type(str(tmp_path / "a"))
+    lock.timeout = good_value
+    assert lock.timeout == pytest.approx(float(good_value))
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+def test_timeout_setter_negative_passes(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
+    # negative timeouts are explicitly allowed by the contract (they disable timeout)
+    lock = lock_type(str(tmp_path / "a"))
+    lock.timeout = -1
+    assert lock.timeout == pytest.approx(-1.0)
