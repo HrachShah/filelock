@@ -1383,3 +1383,35 @@ def test_timeout_setter_negative_passes(lock_type: type[BaseFileLock], tmp_path:
     lock = lock_type(str(tmp_path / "a"))
     lock.timeout = -1
     assert lock.timeout == pytest.approx(-1.0)
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+@pytest.mark.parametrize("bad_value", [True, False, None, "abc", [1, 2], {"a": 1}, (1, 2), {1, 2}])
+def test_poll_interval_setter_rejects_non_numeric(
+    lock_type: type[BaseFileLock], bad_value: object, tmp_path: Path
+) -> None:
+    lock = lock_type(str(tmp_path / "a"))
+    with pytest.raises(TypeError, match="poll_interval must be"):
+        lock.poll_interval = bad_value  # type: ignore[invalid-assignment]
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+@pytest.mark.parametrize("good_value", [0, 0.05, 1, 0.5, 1.5, 10])
+def test_poll_interval_setter_accepts_numeric(
+    lock_type: type[BaseFileLock], good_value: float, tmp_path: Path
+) -> None:
+    lock = lock_type(str(tmp_path / "a"))
+    lock.poll_interval = good_value
+    assert lock.poll_interval == pytest.approx(float(good_value))
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+@pytest.mark.parametrize("neg_value", [-1, -0.5, -0.0001])
+def test_poll_interval_setter_rejects_negative(
+    lock_type: type[BaseFileLock], neg_value: float, tmp_path: Path
+) -> None:
+    # negative poll intervals would call time.sleep() with a negative value, which raises ValueError
+    # deep in the lock loop. Fail at the setter with a clear message naming the actual value instead.
+    lock = lock_type(str(tmp_path / "a"))
+    with pytest.raises(ValueError, match="poll_interval must be non-negative"):
+        lock.poll_interval = neg_value

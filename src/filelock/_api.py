@@ -339,8 +339,16 @@ class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):
 
         :param value: the new value, in seconds
 
+        :raises TypeError: if *value* is not a real number (a bool, ``None``, a string, a container, etc.)
+        :raises ValueError: if *value* is a negative number
         """
-        self._context.poll_interval = value
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            msg = f"poll_interval must be a number, not {type(value).__name__}"
+            raise TypeError(msg)
+        if value < 0:
+            msg = f"poll_interval must be non-negative, got {value}"
+            raise ValueError(msg)
+        self._context.poll_interval = float(value)
 
     @property
     def lifetime(self) -> float | None:
