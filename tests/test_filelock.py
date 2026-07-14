@@ -1995,6 +1995,48 @@ def test_lock_descriptor_invalid_fd_raises(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
+    "bad_fd",
+    [None, "fd", 3.14, b"fd", [], {"key": 1}, (1,)],
+)
+def test_lock_descriptor_rejects_non_int_fd(bad_fd: object) -> None:
+    with pytest.raises(TypeError, match=r"fd must be an int \(a file descriptor returned by os.open\)"):
+        lock_descriptor(bad_fd, blocking=False)
+
+
+@pytest.mark.parametrize(
+    "bad_fd",
+    [None, "fd", 3.14, b"fd", [], {"key": 1}, (1,)],
+)
+def test_lock_descriptor_rejects_non_int_fd_blocking(bad_fd: object) -> None:
+    with pytest.raises(TypeError, match=r"fd must be an int \(a file descriptor returned by os.open\)"):
+        lock_descriptor(bad_fd, blocking=True, poll_interval=0.05)
+
+
+def test_lock_descriptor_rejects_bool_fd() -> None:
+    with pytest.raises(TypeError, match=r"fd must be an int \(a file descriptor returned by os.open\)"):
+        lock_descriptor(True, blocking=False)
+
+
+@pytest.mark.parametrize(
+    "bad_fd",
+    [None, "fd", 3.14, b"fd", [], {"key": 1}, (1,)],
+)
+def test_unlock_descriptor_rejects_non_int_fd(bad_fd: object) -> None:
+    with pytest.raises(TypeError, match=r"fd must be an int \(a file descriptor returned by os.open\)"):
+        unlock_descriptor(bad_fd)
+
+
+def test_lock_descriptor_accepts_real_int_fd(tmp_path: Path) -> None:
+    """Regression: the type guard must not interfere with the normal int fd path."""
+    fd = os.open(str(tmp_path / "a"), os.O_RDWR | os.O_CREAT)
+    try:
+        assert lock_descriptor(fd, blocking=False) is True
+        unlock_descriptor(fd)
+    finally:
+        os.close(fd)
+
+
+@pytest.mark.parametrize(
     "poll_interval",
     _INVALID_DESCRIPTOR_POLL_INTERVALS,
 )
