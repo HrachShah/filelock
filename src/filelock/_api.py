@@ -122,6 +122,7 @@ class FileLockMeta(ABCMeta):
         **kwargs: Any,  # capture remaining kwargs for subclasses  # noqa: ANN401
     ) -> _T:
         lifetime = _resolve_lifetime(lifetime, supported=cls._lifetime_supported, cls_name=cls.__name__)
+        poll_interval = _resolve_poll_interval(poll_interval)
         # Validate before building the instance: a raise inside __init__ would leave a half-constructed object whose
         # __del__ then trips over the missing context.
         context_error_policy = _resolve_context_error_policy(context_error_policy)
@@ -272,6 +273,16 @@ def _resolve_lifetime(lifetime: float | None, *, supported: bool, cls_name: str)
         )
         return None
     return lifetime
+
+
+def _resolve_poll_interval(value: float) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        msg = f"poll_interval must be a finite number greater than 0, not {type(value).__name__}"
+        raise TypeError(msg)
+    if not math.isfinite(value) or value <= 0:
+        msg = f"poll_interval must be finite and greater than 0, not {value!r}"
+        raise ValueError(msg)
+    return float(value)
 
 
 def _resolve_context_error_policy(policy: str) -> ContextErrorPolicy:
@@ -594,7 +605,7 @@ class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):  # noqa
         :param value: the new value, in seconds
 
         """
-        self._context.poll_interval = value
+        self._context.poll_interval = _resolve_poll_interval(value)
 
     @property
     def lifetime(self) -> float | None:
@@ -742,6 +753,7 @@ class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):  # noqa
             poll_interval = poll_intervall
 
         poll_interval = poll_interval if poll_interval is not None else self._context.poll_interval
+        poll_interval = _resolve_poll_interval(poll_interval)
 
         # Bump the counter up front; _undo_acquire rolls it back if acquisition fails.
         self._context.lock_counter += 1

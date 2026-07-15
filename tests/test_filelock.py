@@ -511,6 +511,37 @@ def test_poll_intervall_deprecated(lock_type: type[BaseFileLock], tmp_path: Path
 
 
 @pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+@pytest.mark.parametrize(
+    "poll_interval",
+    [0, -1, float("nan"), float("inf"), float("-inf"), True, "0"],
+)
+def test_poll_interval_rejects_invalid_constructor_values(
+    lock_type: type[BaseFileLock], poll_interval: object, tmp_path: Path
+) -> None:
+    error_type = TypeError if isinstance(poll_interval, (bool, str)) else ValueError
+    with pytest.raises(error_type, match="poll_interval"):
+        lock_type(tmp_path / "a", poll_interval=poll_interval)
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+def test_poll_interval_setter_rejects_non_positive_value(
+    lock_type: type[BaseFileLock], tmp_path: Path
+) -> None:
+    lock = lock_type(tmp_path / "a")
+    with pytest.raises(ValueError, match="poll_interval"):
+        lock.poll_interval = 0
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+def test_poll_interval_acquire_override_rejects_non_positive_value(
+    lock_type: type[BaseFileLock], tmp_path: Path
+) -> None:
+    lock = lock_type(tmp_path / "a")
+    with pytest.raises(ValueError, match="poll_interval"):
+        lock.acquire(poll_interval=0)
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
 def test_default_poll_interval(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
     lock_path = tmp_path / "a"
     lock = lock_type(str(lock_path))
