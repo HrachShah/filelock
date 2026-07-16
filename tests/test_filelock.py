@@ -537,6 +537,18 @@ def test_default_poll_interval(lock_type: type[BaseFileLock], tmp_path: Path) ->
 
 
 @pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+def test_poll_interval_rejects_invalid_values(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
+    lock = lock_type(str(tmp_path / "a"))
+
+    with pytest.raises(TypeError, match="poll_interval must be a non-negative number"):
+        lock.poll_interval = True
+    with pytest.raises(TypeError, match="poll_interval must be a non-negative number"):
+        lock.poll_interval = "0.1"  # type: ignore[assignment]
+    with pytest.raises(ValueError, match="poll_interval must be non-negative"):
+        lock.poll_interval = -0.1
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
 def test_poll_interval_used_by_context_manager(
     lock_type: type[BaseFileLock], tmp_path: Path, mocker: MockerFixture
 ) -> None:
