@@ -602,8 +602,8 @@ class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):  # noqa
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             msg = f"poll_interval must be a non-negative number, not {type(value).__name__}"
             raise TypeError(msg)
-        if value < 0:
-            msg = f"poll_interval must be non-negative, not {value!r}"
+        if value < 0 or not math.isfinite(value):
+            msg = f"poll_interval must be finite and non-negative, not {value!r}"
             raise ValueError(msg)
         self._context.poll_interval = float(value)
 

@@ -544,8 +544,12 @@ def test_poll_interval_rejects_invalid_values(lock_type: type[BaseFileLock], tmp
         lock.poll_interval = True
     with pytest.raises(TypeError, match="poll_interval must be a non-negative number"):
         lock.poll_interval = "0.1"  # type: ignore[assignment]
-    with pytest.raises(ValueError, match="poll_interval must be non-negative"):
+    with pytest.raises(ValueError, match="poll_interval must be finite and non-negative"):
         lock.poll_interval = -0.1
+    with pytest.raises(ValueError, match="poll_interval must be finite and non-negative"):
+        lock.poll_interval = float("nan")
+    with pytest.raises(ValueError, match="poll_interval must be finite and non-negative"):
+        lock.poll_interval = float("inf")
 
 
 @pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
