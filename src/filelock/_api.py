@@ -122,6 +122,7 @@ class FileLockMeta(ABCMeta):
         **kwargs: Any,  # capture remaining kwargs for subclasses  # noqa: ANN401
     ) -> _T:
         lifetime = _resolve_lifetime(lifetime, supported=cls._lifetime_supported, cls_name=cls.__name__)
+        timeout = _resolve_timeout(timeout)
         # Validate before building the instance: a raise inside __init__ would leave a half-constructed object whose
         # __del__ then trips over the missing context.
         context_error_policy = _resolve_context_error_policy(context_error_policy)
@@ -216,6 +217,21 @@ class FileLockMeta(ABCMeta):
 
 _INIT_PARAMETER_MODELS: Final[WeakKeyDictionary[type[BaseFileLock], _InitParameterModel]] = WeakKeyDictionary()
 _INIT_PARAMETER_MODELS_LOCK: Final[Lock] = Lock()
+
+
+def _resolve_timeout(timeout: float | str) -> float:
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float, str)):
+        msg = f"timeout must be a finite number, not {type(timeout).__name__}"
+        raise TypeError(msg)
+    try:
+        resolved = float(timeout)
+    except ValueError as exc:
+        msg = f"timeout must be a finite number, not {timeout!r}"
+        raise ValueError(msg) from exc
+    if not math.isfinite(resolved):
+        msg = f"timeout must be finite, not {timeout!r}"
+        raise ValueError(msg)
+    return resolved
 
 
 def _init_parameter_model(cls: type[BaseFileLock]) -> _InitParameterModel:
@@ -554,10 +570,7 @@ class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):  # noqa
         :param value: the new value, in seconds
 
         """
-        if isinstance(value, bool) or not isinstance(value, (int, float, str)):
-            msg = f"timeout must be a non-negative number or None, not {type(value).__name__}"
-            raise TypeError(msg)
-        self._context.timeout = float(value)
+        self._context.timeout = _resolve_timeout(value)
 
     @property
     def blocking(self) -> bool:
