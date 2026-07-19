@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import atexit
 import logging
+import math
 import os
 import pathlib
 import sqlite3
@@ -368,6 +369,10 @@ class ReadWriteLock(metaclass=_ReadWriteLockMeta):
 def timeout_for_sqlite(timeout: float, *, blocking: bool, already_waited: float) -> int:
     if blocking is False:
         return 0
+
+    if not math.isfinite(timeout):
+        msg = "timeout must be finite or -1"
+        raise ValueError(msg)
 
     if timeout == -1:
         return _MAX_SQLITE_TIMEOUT_MS
