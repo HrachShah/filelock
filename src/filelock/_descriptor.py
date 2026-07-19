@@ -13,6 +13,20 @@ else:  # pragma: win32 no cover
     from ._unix import _lock_fd_nonblocking, _unlock_fd
 
 
+def _check_fd_is_int(fd: object) -> int:
+    """Coerce *fd* to ``int`` for the native ``fcntl``/``msvcrt`` lock calls, raising a named TypeError otherwise.
+
+    The lock primitive is C-level and only raises ``TypeError: argument must be an int, or have a fileno() method.``
+    which points at ``fcntl.flock``/``msvcrt.locking`` rather than the function the caller actually invoked. A
+    caller that passes ``None`` (e.g. a forgotten ``os.open`` return), a string, or any other non-int gets
+    nothing in the message identifying ``fd`` as the wrong argument. This guard surfaces that explicitly.
+    """
+    if not isinstance(fd, int) or isinstance(fd, bool):
+        msg = f"fd must be an int (a file descriptor returned by os.open), got {type(fd).__name__}: {fd!r}"
+        raise TypeError(msg)
+    return fd
+
+
 def lock_descriptor(fd: int, *, blocking: bool = True, poll_interval: float = 0.05) -> bool:
     """
     Take the native OS lock on *fd*, a file descriptor the caller opened and owns.
@@ -33,6 +47,8 @@ def lock_descriptor(fd: int, *, blocking: bool = True, poll_interval: float = 0.
 
     :returns: ``True`` once the lock is held, or ``False`` on contention when ``blocking`` is ``False``.
 
+    :raises TypeError: if *fd* is not an ``int`` (a bool is also rejected; bool is ``isinstance int`` but is never a
+        file descriptor).
     :raises OSError: for a permanent native failure, such as an invalid descriptor, or with ``errno.ENOSYS`` when the
         Python build lacks the native locking primitive. The descriptor is left open.
     :raises ValueError: if a blocking call receives a non-finite or non-positive *poll_interval*.
@@ -40,6 +56,7 @@ def lock_descriptor(fd: int, *, blocking: bool = True, poll_interval: float = 0.
     .. versionadded:: 3.30.0
 
     """
+    _check_fd_is_int(fd)
     if not blocking:
         return _lock_fd_nonblocking(fd)
     if not isfinite(poll_interval) or poll_interval <= 0:
@@ -56,12 +73,14 @@ def unlock_descriptor(fd: int) -> None:
 
     :param fd: the descriptor a prior :func:`lock_descriptor` locked; the caller still owns and must close it.
 
+    :raises TypeError: if *fd* is not an ``int``.
     :raises OSError: if the native unlock fails, including ``errno.ENOSYS`` when the Python build lacks the native
         locking primitive; the caller may retry on the same descriptor.
 
     .. versionadded:: 3.30.0
 
     """
+    _check_fd_is_int(fd)
     _unlock_fd(fd)
 
 
