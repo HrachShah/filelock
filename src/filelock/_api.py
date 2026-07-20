@@ -234,6 +234,16 @@ def _resolve_timeout(timeout: float | str) -> float:
     return resolved
 
 
+def _resolve_poll_interval(value: float) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        msg = f"poll_interval must be a non-negative number, not {type(value).__name__}"
+        raise TypeError(msg)
+    if value < 0 or not math.isfinite(value):
+        msg = f"poll_interval must be finite and non-negative, not {value!r}"
+        raise ValueError(msg)
+    return float(value)
+
+
 def _init_parameter_model(cls: type[BaseFileLock]) -> _InitParameterModel:
     # A strong cache would keep dynamically created subclasses alive for the process lifetime.
     with _INIT_PARAMETER_MODELS_LOCK:
@@ -613,13 +623,7 @@ class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):  # noqa
         :raises ValueError: if *value* is a negative number
         :raises TypeError: if *value* is not a real number
         """
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            msg = f"poll_interval must be a non-negative number, not {type(value).__name__}"
-            raise TypeError(msg)
-        if value < 0 or not math.isfinite(value):
-            msg = f"poll_interval must be finite and non-negative, not {value!r}"
-            raise ValueError(msg)
-        self._context.poll_interval = float(value)
+        self._context.poll_interval = _resolve_poll_interval(value)
 
     @property
     def lifetime(self) -> float | None:
@@ -767,6 +771,7 @@ class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):  # noqa
             poll_interval = poll_intervall
 
         poll_interval = poll_interval if poll_interval is not None else self._context.poll_interval
+        poll_interval = _resolve_poll_interval(poll_interval)
 
         # Bump the counter up front; _undo_acquire rolls it back if acquisition fails.
         self._context.lock_counter += 1

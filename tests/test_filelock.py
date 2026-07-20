@@ -590,6 +590,17 @@ def test_poll_interval_used_by_context_manager(
 
 
 @pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+@pytest.mark.parametrize("poll_interval", [-0.1, float("nan"), float("inf"), True, "0.1"])
+def test_poll_interval_acquire_override_rejects_invalid_values(
+    lock_type: type[BaseFileLock], tmp_path: Path, poll_interval: object
+) -> None:
+    lock = lock_type(str(tmp_path / "a"))
+
+    with pytest.raises((TypeError, ValueError), match="poll_interval"):
+        lock.acquire(poll_interval=poll_interval)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
 def test_poll_interval_acquire_override(lock_type: type[BaseFileLock], tmp_path: Path, mocker: MockerFixture) -> None:
     lock_path = tmp_path / "a"
     lock_1 = lock_type(str(lock_path))
