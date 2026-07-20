@@ -461,6 +461,7 @@ class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):  # noqa
             "lifetime": lifetime,
         }
         self._context: FileLockContext = (ThreadLocalFileContext if thread_local else FileLockContext)(**kwargs)
+        self.poll_interval = poll_interval
 
     def is_thread_local(self) -> bool:
         """:returns: a flag indicating if this lock is thread local or not"""

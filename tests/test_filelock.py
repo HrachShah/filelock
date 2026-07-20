@@ -542,6 +542,11 @@ def test_default_poll_interval(lock_type: type[BaseFileLock], tmp_path: Path) ->
     lock_2 = lock_type(str(lock_path), poll_interval=0.1)
     assert lock_2.poll_interval == pytest.approx(0.1)
 
+    with pytest.raises(ValueError, match="poll_interval must be finite and non-negative"):
+        lock_type(str(lock_path), poll_interval=-0.1)
+    with pytest.raises(TypeError, match="poll_interval must be a non-negative number"):
+        lock_type(str(lock_path), poll_interval=True)
+
     lock_2.poll_interval = 0.2
     assert lock_2.poll_interval == pytest.approx(0.2)
 
