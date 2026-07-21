@@ -22,6 +22,7 @@ from ._api import (
     _canonical,
     _raise_body_and_release,
     _resolve_poll_interval,
+    _resolve_timeout,
 )
 from ._error import Timeout
 from ._soft import SoftFileLock
@@ -259,6 +260,7 @@ class BaseAsyncFileLock(BaseFileLock, metaclass=AsyncFileLockMeta):
         """
         if timeout is None:
             timeout = self._context.timeout
+        timeout = _resolve_timeout(timeout)
 
         if blocking is None:
             blocking = self._context.blocking

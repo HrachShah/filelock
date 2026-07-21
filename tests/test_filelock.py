@@ -333,6 +333,23 @@ def test_threaded_lock_different_lock_obj(lock_type: type[BaseFileLock], tmp_pat
 
 
 @pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+def test_timeout_rejects_nan(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="timeout must be finite"):
+        lock_type(str(tmp_path / "a"), timeout=float("nan"))
+
+    lock = lock_type(str(tmp_path / "b"))
+    with pytest.raises(ValueError, match="timeout must be finite"):
+        lock.timeout = float("nan")
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+def test_acquire_timeout_override_rejects_nan(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
+    lock = lock_type(str(tmp_path / "a"))
+    with pytest.raises(ValueError, match="timeout must be finite"):
+        lock.acquire(timeout=float("nan"))
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
 def test_timeout(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
     lock_path = tmp_path / "a"
     lock_1, lock_2 = lock_type(str(lock_path)), lock_type(str(lock_path))
