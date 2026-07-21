@@ -761,6 +761,8 @@ class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):  # noqa
         """
         if timeout is None:
             timeout = self._context.timeout
+        else:
+            timeout = _resolve_timeout(timeout)
 
         if blocking is None:
             blocking = self._context.blocking

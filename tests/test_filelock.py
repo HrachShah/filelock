@@ -352,6 +352,16 @@ def test_timeout(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf"), "not-a-number"])
+def test_acquire_timeout_rejects_non_finite_values(
+    lock_type: type[BaseFileLock], bad_value: object, tmp_path: Path
+) -> None:
+    lock = lock_type(str(tmp_path / "a"))
+    with pytest.raises((TypeError, ValueError), match="timeout must be"):
+        lock.acquire(timeout=bad_value)  # ty: ignore[arg-type]
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
 def test_non_blocking(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
     lock_path = tmp_path / "a"
     lock_1, lock_2 = lock_type(str(lock_path)), lock_type(str(lock_path))

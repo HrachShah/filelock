@@ -384,6 +384,17 @@ async def test_finite_timeout_gives_timeout_not_deadlock(tmp_path: Path, lock_ty
             await lock2.acquire()
 
 
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf"), "not-a-number"])
+@pytest.mark.parametrize("lock_type", [AsyncFileLock, AsyncSoftFileLock])
+@pytest.mark.asyncio
+async def test_acquire_timeout_rejects_non_finite_values(
+    tmp_path: Path, bad_value: object, lock_type: type[BaseAsyncFileLock]
+) -> None:
+    lock = lock_type(tmp_path / "test.lock")
+    with pytest.raises((TypeError, ValueError), match="timeout must be"):
+        await lock.acquire(timeout=bad_value)  # type: ignore[arg-type]
+
+
 @pytest.mark.parametrize("lock_type", [AsyncFileLock, AsyncSoftFileLock])
 @pytest.mark.asyncio
 async def test_non_blocking_gives_timeout_not_deadlock(tmp_path: Path, lock_type: type[BaseAsyncFileLock]) -> None:
