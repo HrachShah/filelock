@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import atexit
 import logging
+import math
 import os
 import pathlib
 import sqlite3
@@ -37,6 +38,16 @@ atexit.register(_cleanup_connections)
 _MAX_SQLITE_TIMEOUT_MS: Final[int] = 2_000_000_000 - 1
 
 
+def _resolve_timeout(value: float) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        msg = f"timeout must be a number, not {type(value).__name__}"
+        raise TypeError(msg)
+    if not math.isfinite(value):
+        msg = f"timeout must be finite, not {value!r}"
+        raise ValueError(msg)
+    return float(value)
+
+
 class _ReadWriteLockMeta(type):
     """
     Resolve singleton instances for ``is_singleton=True`` construction.
@@ -57,6 +68,7 @@ class _ReadWriteLockMeta(type):
         blocking: bool = True,
         is_singleton: bool = True,
     ) -> ReadWriteLock:
+        timeout = _resolve_timeout(timeout)
         if not is_singleton:
             return super().__call__(lock_file, timeout, blocking=blocking, is_singleton=is_singleton)
 
@@ -128,7 +140,7 @@ class ReadWriteLock(metaclass=_ReadWriteLockMeta):
         is_singleton: bool = True,  # noqa: ARG002  # consumed by _ReadWriteLockMeta.__call__
     ) -> None:
         self.lock_file = os.fspath(lock_file)
-        self.timeout = timeout
+        self.timeout = _resolve_timeout(timeout)
         self.blocking = blocking
         self._transaction_lock = threading.Lock()  # serializes the (possibly blocking) SQLite transaction work
         self._internal_lock = threading.Lock()  # protects _lock_level / _current_mode updates and rollback
@@ -268,6 +280,7 @@ class ReadWriteLock(metaclass=_ReadWriteLockMeta):
             _all_connections.discard(self._con)
 
     def _acquire(self, mode: Literal["read", "write"], timeout: float, *, blocking: bool) -> AcquireReturnProxy:
+        timeout = _resolve_timeout(timeout)
         with self._internal_lock:
             if self._lock_level > 0:
                 return self._validate_reentrant(mode)
@@ -366,6 +379,7 @@ class ReadWriteLock(metaclass=_ReadWriteLockMeta):
 
 
 def timeout_for_sqlite(timeout: float, *, blocking: bool, already_waited: float) -> int:
+    timeout = _resolve_timeout(timeout)
     if blocking is False:
         return 0
 
