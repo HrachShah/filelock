@@ -385,6 +385,18 @@ async def test_finite_timeout_gives_timeout_not_deadlock(tmp_path: Path, lock_ty
 
 
 @pytest.mark.parametrize("lock_type", [AsyncFileLock, AsyncSoftFileLock])
+@pytest.mark.parametrize("poll_interval", [0, -1, float("nan"), float("inf"), True, "0"])
+@pytest.mark.asyncio
+async def test_acquire_rejects_invalid_poll_interval(
+    lock_type: type[BaseAsyncFileLock], poll_interval: object, tmp_path: Path
+) -> None:
+    lock = lock_type(tmp_path / "a")
+    error_type = TypeError if isinstance(poll_interval, (bool, str)) else ValueError
+    with pytest.raises(error_type, match="poll_interval"):
+        await lock.acquire(poll_interval=poll_interval)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("lock_type", [AsyncFileLock, AsyncSoftFileLock])
 @pytest.mark.asyncio
 async def test_non_blocking_gives_timeout_not_deadlock(tmp_path: Path, lock_type: type[BaseAsyncFileLock]) -> None:
     lock_path = tmp_path / "test.lock"
