@@ -290,10 +290,15 @@ def _resolve_timeout(value: float) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         msg = f"timeout must be a number, not {type(value).__name__}"
         raise TypeError(msg)
+    try:
+        value = float(value)
+    except OverflowError:
+        msg = f"timeout must be finite, not {value!r}"
+        raise ValueError(msg) from None
     if not math.isfinite(value):
         msg = f"timeout must be finite, not {value!r}"
         raise ValueError(msg)
-    return float(value)
+    return value
 
 
 def _resolve_context_error_policy(policy: str) -> ContextErrorPolicy:
