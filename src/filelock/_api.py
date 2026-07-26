@@ -121,6 +121,7 @@ class FileLockMeta(ABCMeta):
         on_acquired: Callable[[int], None] | None = None,
         **kwargs: Any,  # capture remaining kwargs for subclasses  # noqa: ANN401
     ) -> _T:
+        timeout = _resolve_timeout(timeout)
         lifetime = _resolve_lifetime(lifetime, supported=cls._lifetime_supported, cls_name=cls.__name__)
         # Validate before building the instance: a raise inside __init__ would leave a half-constructed object whose
         # __del__ then trips over the missing context.
@@ -245,6 +246,15 @@ class _InitParameterModel:
     accepted_params: frozenset[str]
     accepts_kwargs: bool
     default_params: dict[str, inspect.Parameter]
+
+
+def _resolve_timeout(timeout: float | str) -> float:
+    """Convert a timeout value and reject non-finite numbers before polling."""
+    timeout = float(timeout)
+    if not math.isfinite(timeout):
+        msg = f"timeout must be finite, not {timeout!r}"
+        raise ValueError(msg)
+    return timeout
 
 
 def _resolve_lifetime(lifetime: float | None, *, supported: bool, cls_name: str) -> float | None:
@@ -554,7 +564,7 @@ class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):  # noqa
         :param value: the new value, in seconds
 
         """
-        self._context.timeout = float(value)
+        self._context.timeout = _resolve_timeout(value)
 
     @property
     def blocking(self) -> bool:
@@ -732,6 +742,8 @@ class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):  # noqa
         """
         if timeout is None:
             timeout = self._context.timeout
+        else:
+            timeout = _resolve_timeout(timeout)
 
         if blocking is None:
             blocking = self._context.blocking

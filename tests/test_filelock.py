@@ -410,6 +410,19 @@ def test_non_blocking(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
     assert not lock_5.is_locked
 
 
+@pytest.mark.parametrize("timeout", [float("nan"), float("inf"), float("-inf")])
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+def test_non_finite_timeout_is_rejected(lock_type: type[BaseFileLock], tmp_path: Path, timeout: float) -> None:
+    with pytest.raises(ValueError, match="timeout must be finite"):
+        lock_type(str(tmp_path / "a"), timeout=timeout)
+
+    lock = lock_type(str(tmp_path / "b"))
+    with pytest.raises(ValueError, match="timeout must be finite"):
+        lock.acquire(timeout=timeout)
+    with pytest.raises(ValueError, match="timeout must be finite"):
+        lock.timeout = timeout
+
+
 @pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
 def test_default_timeout(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
     lock_path = tmp_path / "a"
