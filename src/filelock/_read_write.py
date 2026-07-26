@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import atexit
 import logging
+import math
 import os
 import pathlib
 import sqlite3
@@ -371,6 +372,10 @@ def timeout_for_sqlite(timeout: float, *, blocking: bool, already_waited: float)
 
     if timeout == -1:
         return _MAX_SQLITE_TIMEOUT_MS
+
+    if not math.isfinite(timeout):
+        msg = "timeout must be a finite number or -1"
+        raise ValueError(msg)
 
     if timeout < 0:
         msg = "timeout must be a non-negative number or -1"
