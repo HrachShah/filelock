@@ -225,7 +225,7 @@ def _resolve_timeout(timeout: float | str) -> float:
         raise TypeError(msg)
     try:
         resolved = float(timeout)
-    except ValueError as exc:
+    except (ValueError, OverflowError) as exc:
         msg = f"timeout must be a finite number, not {timeout!r}"
         raise ValueError(msg) from exc
     if not math.isfinite(resolved):

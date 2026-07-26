@@ -459,6 +459,12 @@ def test_timeout_rejects_non_finite_values(lock_type: type[BaseFileLock], bad_va
 
 
 @pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+def test_timeout_rejects_integer_overflow(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="timeout must be a finite number"):
+        lock_type(str(tmp_path / "a"), timeout=10**1000)
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
 def test_timeout_setter_rejects_bool(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
     # bool is an int subclass; without the guard, lock.timeout = True would
     # silently turn into 1.0 second and lock.timeout = False into 0.0 seconds
