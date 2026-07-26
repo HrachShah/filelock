@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import sys
 import threading
 from typing import TYPE_CHECKING, Literal
@@ -54,6 +55,12 @@ def test_timeout_for_sqlite_infinite_timeout() -> None:
 def test_timeout_for_sqlite_negative_timeout_raises() -> None:
     with pytest.raises(ValueError, match="timeout must be a non-negative number or -1"):
         timeout_for_sqlite(-2, blocking=True, already_waited=0.0)
+
+
+@pytest.mark.parametrize("timeout", [math.inf, -math.inf, math.nan])
+def test_timeout_for_sqlite_non_finite_timeout_raises(timeout: float) -> None:
+    with pytest.raises(ValueError, match="timeout must be a finite number or -1"):
+        timeout_for_sqlite(timeout, blocking=True, already_waited=0.0)
 
 
 def test_timeout_for_sqlite_positive_timeout_subtracts_waited() -> None:

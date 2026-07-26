@@ -122,6 +122,7 @@ class FileLockMeta(ABCMeta):
         **kwargs: Any,  # capture remaining kwargs for subclasses  # noqa: ANN401
     ) -> _T:
         lifetime = _resolve_lifetime(lifetime, supported=cls._lifetime_supported, cls_name=cls.__name__)
+        timeout = _resolve_timeout(timeout)
         # Validate before building the instance: a raise inside __init__ would leave a half-constructed object whose
         # __del__ then trips over the missing context.
         context_error_policy = _resolve_context_error_policy(context_error_policy)
@@ -216,6 +217,31 @@ class FileLockMeta(ABCMeta):
 
 _INIT_PARAMETER_MODELS: Final[WeakKeyDictionary[type[BaseFileLock], _InitParameterModel]] = WeakKeyDictionary()
 _INIT_PARAMETER_MODELS_LOCK: Final[Lock] = Lock()
+
+
+def _resolve_timeout(timeout: float | str) -> float:
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float, str)):
+        msg = f"timeout must be a finite number, not {type(timeout).__name__}"
+        raise TypeError(msg)
+    try:
+        resolved = float(timeout)
+    except (ValueError, OverflowError) as exc:
+        msg = f"timeout must be a finite number, not {timeout!r}"
+        raise ValueError(msg) from exc
+    if not math.isfinite(resolved):
+        msg = f"timeout must be finite, not {timeout!r}"
+        raise ValueError(msg)
+    return resolved
+
+
+def _resolve_poll_interval(value: float) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        msg = f"poll_interval must be a non-negative number, not {type(value).__name__}"
+        raise TypeError(msg)
+    if value < 0 or not math.isfinite(value):
+        msg = f"poll_interval must be finite and non-negative, not {value!r}"
+        raise ValueError(msg)
+    return float(value)
 
 
 def _init_parameter_model(cls: type[BaseFileLock]) -> _InitParameterModel:
@@ -445,6 +471,7 @@ class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):  # noqa
             "lifetime": lifetime,
         }
         self._context: FileLockContext = (ThreadLocalFileContext if thread_local else FileLockContext)(**kwargs)
+        self.poll_interval = poll_interval
 
     def is_thread_local(self) -> bool:
         """:returns: a flag indicating if this lock is thread local or not"""
@@ -554,7 +581,7 @@ class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):  # noqa
         :param value: the new value, in seconds
 
         """
-        self._context.timeout = float(value)
+        self._context.timeout = _resolve_timeout(value)
 
     @property
     def blocking(self) -> bool:
@@ -593,8 +620,10 @@ class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):  # noqa
 
         :param value: the new value, in seconds
 
+        :raises ValueError: if *value* is a negative number
+        :raises TypeError: if *value* is not a real number
         """
-        self._context.poll_interval = value
+        self._context.poll_interval = _resolve_poll_interval(value)
 
     @property
     def lifetime(self) -> float | None:
@@ -732,6 +761,8 @@ class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):  # noqa
         """
         if timeout is None:
             timeout = self._context.timeout
+        else:
+            timeout = _resolve_timeout(timeout)
 
         if blocking is None:
             blocking = self._context.blocking
@@ -742,6 +773,7 @@ class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):  # noqa
             poll_interval = poll_intervall
 
         poll_interval = poll_interval if poll_interval is not None else self._context.poll_interval
+        poll_interval = _resolve_poll_interval(poll_interval)
 
         # Bump the counter up front; _undo_acquire rolls it back if acquisition fails.
         self._context.lock_counter += 1

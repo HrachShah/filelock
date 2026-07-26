@@ -352,6 +352,16 @@ def test_timeout(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf"), "not-a-number"])
+def test_acquire_timeout_rejects_non_finite_values(
+    lock_type: type[BaseFileLock], bad_value: object, tmp_path: Path
+) -> None:
+    lock = lock_type(str(tmp_path / "a"))
+    with pytest.raises((TypeError, ValueError), match="timeout must be"):
+        lock.acquire(timeout=bad_value)  # ty: ignore[arg-type]
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
 def test_non_blocking(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
     lock_path = tmp_path / "a"
     lock_1, lock_2 = lock_type(str(lock_path)), lock_type(str(lock_path))
@@ -439,6 +449,35 @@ def test_default_timeout(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf"), "not-a-number"])
+def test_timeout_rejects_non_finite_values(lock_type: type[BaseFileLock], bad_value: object, tmp_path: Path) -> None:
+    lock = lock_type(str(tmp_path / "a"))
+    with pytest.raises((TypeError, ValueError), match="timeout must be"):
+        lock_type(str(tmp_path / "b"), timeout=bad_value)  # ty: ignore[invalid-argument-type]
+    with pytest.raises((TypeError, ValueError), match="timeout must be"):
+        lock.timeout = bad_value  # ty: ignore[invalid-assignment]
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+def test_timeout_rejects_integer_overflow(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="timeout must be a finite number"):
+        lock_type(str(tmp_path / "a"), timeout=10**1000)
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+def test_timeout_setter_rejects_bool(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
+    # bool is an int subclass; without the guard, lock.timeout = True would
+    # silently turn into 1.0 second and lock.timeout = False into 0.0 seconds
+    # (meaning "give up immediately on every acquire"). Reject bool the same
+    # way the lifetime setter does so the misconfiguration surfaces at
+    # assignment time rather than on the first lock attempt.
+    lock = lock_type(str(tmp_path / "a"))
+    with pytest.raises(TypeError, match="timeout must be"):
+        lock.timeout = True  # ty: ignore[invalid-assignment]
+    with pytest.raises(TypeError, match="timeout must be"):
+        lock.timeout = False  # ty: ignore[invalid-assignment]
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
 def test_context_release_on_exc(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
     lock_path = tmp_path / "a"
     lock = lock_type(str(lock_path))
@@ -519,8 +558,29 @@ def test_default_poll_interval(lock_type: type[BaseFileLock], tmp_path: Path) ->
     lock_2 = lock_type(str(lock_path), poll_interval=0.1)
     assert lock_2.poll_interval == pytest.approx(0.1)
 
+    with pytest.raises(ValueError, match="poll_interval must be finite and non-negative"):
+        lock_type(str(lock_path), poll_interval=-0.1)
+    with pytest.raises(TypeError, match="poll_interval must be a non-negative number"):
+        lock_type(str(lock_path), poll_interval=True)
+
     lock_2.poll_interval = 0.2
     assert lock_2.poll_interval == pytest.approx(0.2)
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+def test_poll_interval_rejects_invalid_values(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
+    lock = lock_type(str(tmp_path / "a"))
+
+    with pytest.raises(TypeError, match="poll_interval must be a non-negative number"):
+        lock.poll_interval = True
+    with pytest.raises(TypeError, match="poll_interval must be a non-negative number"):
+        lock.poll_interval = "0.1"  # type: ignore[assignment]
+    with pytest.raises(ValueError, match="poll_interval must be finite and non-negative"):
+        lock.poll_interval = -0.1
+    with pytest.raises(ValueError, match="poll_interval must be finite and non-negative"):
+        lock.poll_interval = float("nan")
+    with pytest.raises(ValueError, match="poll_interval must be finite and non-negative"):
+        lock.poll_interval = float("inf")
 
 
 @pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
@@ -543,6 +603,17 @@ def test_poll_interval_used_by_context_manager(
         lock_2.acquire()
     sleep_mock.assert_called_with(0.1)
     lock_1.release()
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+@pytest.mark.parametrize("poll_interval", [-0.1, float("nan"), float("inf"), True, "0.1"])
+def test_poll_interval_acquire_override_rejects_invalid_values(
+    lock_type: type[BaseFileLock], tmp_path: Path, poll_interval: object
+) -> None:
+    lock = lock_type(str(tmp_path / "a"))
+
+    with pytest.raises((TypeError, ValueError), match="poll_interval"):
+        lock.acquire(poll_interval=poll_interval)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
