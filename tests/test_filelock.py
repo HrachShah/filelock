@@ -524,6 +524,25 @@ def test_poll_intervall_deprecated(lock_type: type[BaseFileLock], tmp_path: Path
 
 
 @pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf"), -0.1])
+def test_constructor_rejects_invalid_poll_interval(
+    lock_type: type[BaseFileLock], bad_value: float, tmp_path: Path
+) -> None:
+    with pytest.raises(ValueError, match="poll_interval must be finite and non-negative"):
+        lock_type(str(tmp_path / "a"), poll_interval=bad_value)
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf"), -0.1])
+def test_acquire_rejects_invalid_poll_interval_override(
+    lock_type: type[BaseFileLock], bad_value: float, tmp_path: Path
+) -> None:
+    lock = lock_type(str(tmp_path / "a"))
+    with pytest.raises(ValueError, match="poll_interval must be finite and non-negative"):
+        lock.acquire(poll_interval=bad_value)
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
 def test_default_poll_interval(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
     lock_path = tmp_path / "a"
     lock = lock_type(str(lock_path))

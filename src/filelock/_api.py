@@ -122,6 +122,7 @@ class FileLockMeta(ABCMeta):
         **kwargs: Any,  # capture remaining kwargs for subclasses  # noqa: ANN401
     ) -> _T:
         timeout = _resolve_timeout(timeout)
+        poll_interval = _resolve_poll_interval(poll_interval)
         lifetime = _resolve_lifetime(lifetime, supported=cls._lifetime_supported, cls_name=cls.__name__)
         # Validate before building the instance: a raise inside __init__ would leave a half-constructed object whose
         # __del__ then trips over the missing context.
@@ -255,6 +256,22 @@ def _resolve_timeout(timeout: float | str) -> float:
         msg = f"timeout must be finite, not {timeout!r}"
         raise ValueError(msg)
     return timeout
+
+
+def _resolve_poll_interval(value: float | str) -> float:
+    """Convert a polling interval and reject values that cannot be passed to sleep()."""
+    if isinstance(value, bool):
+        msg = f"poll_interval must be a number, not {type(value).__name__}"
+        raise TypeError(msg)
+    try:
+        value = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        msg = f"poll_interval must be a number, not {type(value).__name__}"
+        raise TypeError(msg) from exc
+    if not math.isfinite(value) or value < 0:
+        msg = f"poll_interval must be finite and non-negative, got {value}"
+        raise ValueError(msg)
+    return value
 
 
 def _resolve_lifetime(lifetime: float | None, *, supported: bool, cls_name: str) -> float | None:
@@ -754,6 +771,7 @@ class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):  # noqa
             poll_interval = poll_intervall
 
         poll_interval = poll_interval if poll_interval is not None else self._context.poll_interval
+        poll_interval = _resolve_poll_interval(poll_interval)
 
         # Bump the counter up front; _undo_acquire rolls it back if acquisition fails.
         self._context.lock_counter += 1
