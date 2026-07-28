@@ -123,6 +123,7 @@ class FileLockMeta(ABCMeta):
     ) -> _T:
         lifetime = _resolve_lifetime(lifetime, supported=cls._lifetime_supported, cls_name=cls.__name__)
         timeout = _resolve_timeout(timeout)
+        blocking = _resolve_blocking(blocking)
         # Validate before building the instance: a raise inside __init__ would leave a half-constructed object whose
         # __del__ then trips over the missing context.
         context_error_policy = _resolve_context_error_policy(context_error_policy)
@@ -232,6 +233,13 @@ def _resolve_timeout(timeout: float | str) -> float:
         msg = f"timeout must be finite, not {timeout!r}"
         raise ValueError(msg)
     return resolved
+
+
+def _resolve_blocking(value: bool) -> bool:
+    if not isinstance(value, bool):
+        msg = f"blocking must be a bool, not {type(value).__name__}"
+        raise TypeError(msg)
+    return value
 
 
 def _resolve_poll_interval(value: float) -> float:
@@ -601,7 +609,7 @@ class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):  # noqa
         :param value: the new value as bool
 
         """
-        self._context.blocking = value
+        self._context.blocking = _resolve_blocking(value)
 
     @property
     def poll_interval(self) -> float:

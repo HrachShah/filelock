@@ -568,6 +568,16 @@ def test_default_poll_interval(lock_type: type[BaseFileLock], tmp_path: Path) ->
 
 
 @pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+def test_blocking_rejects_non_boolean_values(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
+    lock = lock_type(str(tmp_path / "a"))
+
+    with pytest.raises(TypeError, match="blocking must be a bool"):
+        lock_type(str(tmp_path / "constructor"), blocking="yes")  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="blocking must be a bool"):
+        lock.blocking = 1  # type: ignore[assignment]
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
 def test_poll_interval_rejects_invalid_values(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
     lock = lock_type(str(tmp_path / "a"))
 
