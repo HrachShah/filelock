@@ -614,14 +614,14 @@ class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):  # noqa
         return self._context.poll_interval
 
     @poll_interval.setter
-    def poll_interval(self, value: float) -> None:
+    def poll_interval(self, value: float | str) -> None:
         """
         Change the default polling interval.
 
         :param value: the new value, in seconds
 
         """
-        self._context.poll_interval = value
+        self._context.poll_interval = _resolve_poll_interval(value)
 
     @property
     def lifetime(self) -> float | None:
