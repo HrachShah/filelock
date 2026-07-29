@@ -51,6 +51,12 @@ def test_timeout_for_sqlite_infinite_timeout() -> None:
     assert timeout_for_sqlite(-1, blocking=True, already_waited=0.0) == _MAX_SQLITE_TIMEOUT_MS
 
 
+@pytest.mark.parametrize("timeout", [float("nan"), float("inf"), float("-inf")])
+def test_timeout_for_sqlite_non_blocking_rejects_non_finite_timeout(timeout: float) -> None:
+    with pytest.raises(ValueError, match="timeout must be finite"):
+        timeout_for_sqlite(timeout, blocking=False, already_waited=0.0)
+
+
 def test_timeout_for_sqlite_negative_timeout_raises() -> None:
     with pytest.raises(ValueError, match="timeout must be a non-negative number or -1"):
         timeout_for_sqlite(-2, blocking=True, already_waited=0.0)
