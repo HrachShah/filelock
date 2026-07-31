@@ -21,6 +21,7 @@ from ._api import (
     FileLockMeta,
     _canonical,
     _raise_body_and_release,
+    _resolve_blocking,
     _resolve_timeout,
 )
 from ._error import Timeout
@@ -264,6 +265,8 @@ class BaseAsyncFileLock(BaseFileLock, metaclass=AsyncFileLockMeta):
 
         if blocking is None:
             blocking = self._context.blocking
+        else:
+            blocking = _resolve_blocking(blocking)
 
         if poll_interval is None:
             poll_interval = self._context.poll_interval

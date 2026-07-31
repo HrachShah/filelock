@@ -774,6 +774,8 @@ class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):  # noqa
 
         if blocking is None:
             blocking = self._context.blocking
+        else:
+            blocking = _resolve_blocking(blocking)
 
         if poll_intervall is not None:
             msg = "use poll_interval instead of poll_intervall"

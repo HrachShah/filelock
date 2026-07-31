@@ -624,6 +624,14 @@ async def test_async_zero_write_rolls_back_acquire(tmp_path: Path, mocker: Mocke
     assert not lock.is_locked
 
 
+@pytest.mark.asyncio
+async def test_async_acquire_rejects_non_boolean_override(tmp_path: Path) -> None:
+    lock = AsyncSoftFileLock(str(tmp_path / "a"))
+
+    with pytest.raises(TypeError, match="blocking must be a bool"):
+        await lock.acquire(blocking="yes")  # type: ignore[arg-type]
+
+
 @pytest.mark.parametrize(
     "use_proxy",
     [pytest.param(False, id="direct"), pytest.param(True, id="proxy")],

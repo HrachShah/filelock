@@ -578,6 +578,14 @@ def test_blocking_rejects_non_boolean_values(lock_type: type[BaseFileLock], tmp_
 
 
 @pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+def test_acquire_rejects_non_boolean_override(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
+    lock = lock_type(str(tmp_path / "a"))
+
+    with pytest.raises(TypeError, match="blocking must be a bool"):
+        lock.acquire(blocking="yes")  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
 def test_poll_interval_rejects_invalid_values(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
     lock = lock_type(str(tmp_path / "a"))
 
