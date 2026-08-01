@@ -49,6 +49,18 @@ def lock_file(tmp_path: Path) -> str:
     return str(tmp_path / "test.lock")
 
 
+@pytest.mark.parametrize("timeout", [float("nan"), float("inf"), float("-inf")])
+def test_rejects_non_finite_timeout(lock_file: str, timeout: float) -> None:
+    with pytest.raises(ValueError, match="timeout must be finite"):
+        SoftReadWriteLock(lock_file, timeout=timeout, is_singleton=False)
+
+
+@pytest.mark.parametrize("timeout", ["1", True])
+def test_rejects_non_numeric_timeout(lock_file: str, timeout: object) -> None:
+    with pytest.raises(TypeError, match="timeout must be a number"):
+        SoftReadWriteLock(lock_file, timeout=timeout, is_singleton=False)
+
+
 def test_rejects_non_positive_heartbeat_interval(lock_file: str) -> None:
     with pytest.raises(ValueError, match="heartbeat_interval must be positive"):
         SoftReadWriteLock(lock_file, heartbeat_interval=0, is_singleton=False)

@@ -21,6 +21,7 @@ from weakref import WeakValueDictionary
 
 from filelock._api import AcquireReturnProxy
 from filelock._error import Timeout
+from filelock._read_write import _resolve_timeout
 from filelock._soft import SoftFileLock
 from filelock._util import ensure_directory_exists, write_all
 
@@ -63,6 +64,7 @@ class _SoftRWMeta(type):
         stale_threshold: float | None = None,
         poll_interval: float = 0.25,
     ) -> SoftReadWriteLock:
+        timeout = _resolve_timeout(timeout)
         if not is_singleton:
             return super().__call__(
                 lock_file,
