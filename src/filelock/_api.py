@@ -251,7 +251,14 @@ class _InitParameterModel:
 
 def _resolve_timeout(timeout: float | str) -> float:
     """Convert a timeout value and reject non-finite numbers before polling."""
-    timeout = float(timeout)
+    if isinstance(timeout, bool):
+        msg = f"timeout must be a number, not {type(timeout).__name__}"
+        raise TypeError(msg)
+    try:
+        timeout = float(timeout)
+    except (TypeError, ValueError, OverflowError) as exc:
+        msg = f"timeout must be a number, not {type(timeout).__name__}"
+        raise TypeError(msg) from exc
     if not math.isfinite(timeout):
         msg = f"timeout must be finite, not {timeout!r}"
         raise ValueError(msg)

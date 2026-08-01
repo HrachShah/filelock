@@ -423,6 +423,21 @@ def test_non_finite_timeout_is_rejected(lock_type: type[BaseFileLock], tmp_path:
         lock.timeout = timeout
 
 
+@pytest.mark.parametrize("timeout", [True, False, "not-a-number", b"not-a-number"])
+@pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
+def test_invalid_timeout_types_are_rejected(
+    lock_type: type[BaseFileLock], tmp_path: Path, timeout: object
+) -> None:
+    with pytest.raises(TypeError, match="timeout must be a number"):
+        lock_type(str(tmp_path / "a"), timeout=timeout)  # type: ignore[arg-type]
+
+    lock = lock_type(str(tmp_path / "b"))
+    with pytest.raises(TypeError, match="timeout must be a number"):
+        lock.acquire(timeout=timeout)  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="timeout must be a number"):
+        lock.timeout = timeout  # type: ignore[assignment]
+
+
 @pytest.mark.parametrize("lock_type", [FileLock, SoftFileLock])
 def test_default_timeout(lock_type: type[BaseFileLock], tmp_path: Path) -> None:
     lock_path = tmp_path / "a"
