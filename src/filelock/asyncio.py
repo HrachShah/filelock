@@ -21,6 +21,8 @@ from ._api import (
     FileLockMeta,
     _canonical,
     _raise_body_and_release,
+    _resolve_poll_interval,
+    _resolve_timeout,
 )
 from ._error import Timeout
 from ._soft import SoftFileLock
@@ -258,12 +260,16 @@ class BaseAsyncFileLock(BaseFileLock, metaclass=AsyncFileLockMeta):
         """
         if timeout is None:
             timeout = self._context.timeout
+        else:
+            timeout = _resolve_timeout(timeout)
 
         if blocking is None:
             blocking = self._context.blocking
 
         if poll_interval is None:
             poll_interval = self._context.poll_interval
+        else:
+            poll_interval = _resolve_poll_interval(poll_interval)
 
         # Bump early; _undo_acquire rolls it back if acquisition fails.
         self._context.lock_counter += 1

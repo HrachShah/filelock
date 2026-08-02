@@ -92,6 +92,17 @@ async def test_acquire(
     assert logging.getLogger("filelock").level == logging.NOTSET
 
 
+@pytest.mark.asyncio
+async def test_acquire_rejects_invalid_overrides(tmp_path: Path) -> None:
+    lock = AsyncFileLock(str(tmp_path / "a"))
+
+    with pytest.raises(ValueError, match="timeout must be finite"):
+        await lock.acquire(timeout=float("inf"))
+
+    with pytest.raises(ValueError, match="poll_interval must be finite"):
+        await lock.acquire(poll_interval=-1)
+
+
 @pytest.mark.parametrize("lock_type", [AsyncFileLock, AsyncSoftFileLock])
 @pytest.mark.asyncio
 async def test_non_blocking(lock_type: type[BaseAsyncFileLock], tmp_path: Path) -> None:
