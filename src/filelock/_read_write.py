@@ -366,6 +366,13 @@ class ReadWriteLock(metaclass=_ReadWriteLockMeta):
 
 
 def timeout_for_sqlite(timeout: float, *, blocking: bool, already_waited: float) -> int:
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+        msg = f"timeout must be a number, not {type(timeout).__name__}"
+        raise TypeError(msg)
+    if not math.isfinite(timeout):
+        msg = f"timeout must be finite, not {timeout!r}"
+        raise ValueError(msg)
+
     if blocking is False:
         return 0
 
