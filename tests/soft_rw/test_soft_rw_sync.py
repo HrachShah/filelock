@@ -245,6 +245,12 @@ def test_acquire_on_closed_raises(lock_file: str) -> None:
         lock.acquire_write(timeout=1)
 
 
+
+@pytest.mark.parametrize("name", ["heartbeat_interval", "poll_interval"])
+def test_non_finite_intervals_are_rejected(lock_file: str, name: str) -> None:
+    with pytest.raises(ValueError, match=f"{name} must be finite and positive"):
+        SoftReadWriteLock(lock_file, **{name: float("inf")})
+
 @pytest.mark.timeout(15)
 def test_multiple_readers_can_hold_simultaneously(lock_file: str) -> None:
     r1, r2, release = Event(), Event(), Event()

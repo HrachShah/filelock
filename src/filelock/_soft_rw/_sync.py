@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import atexit
 import hmac
+import math
 import os
 import re
 import secrets
@@ -43,6 +44,16 @@ _SUPPORTS_UTIME_NOFOLLOW: Final[bool] = os.utime in os.supports_follow_symlinks
 # its ``os`` module skips dir_fd support entirely. When disabled, callers fall back to full-path ops.
 _SUPPORTS_DIR_FD: Final[bool] = sys.platform != "win32" and os.open in os.supports_dir_fd
 
+
+def _resolve_positive_interval(value: float, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        msg = f"{name} must be a number, not {type(value).__name__}"
+        raise TypeError(msg)
+    if not math.isfinite(value) or value <= 0:
+        msg = f"{name} must be finite and positive, got {value}"
+        raise ValueError(msg)
+    return float(value)
+
 _all_instances: Final[WeakValueDictionary[Path, SoftReadWriteLock]] = WeakValueDictionary()
 _all_instances_lock = threading.Lock()
 _atexit_registered = False
@@ -65,6 +76,10 @@ class _SoftRWMeta(type):
         poll_interval: float = 0.25,
     ) -> SoftReadWriteLock:
         timeout = _resolve_timeout(timeout)
+        heartbeat_interval = _resolve_positive_interval(heartbeat_interval, "heartbeat_interval")
+        if stale_threshold is not None:
+            stale_threshold = _resolve_positive_interval(stale_threshold, "stale_threshold")
+        poll_interval = _resolve_positive_interval(poll_interval, "poll_interval")
         if not is_singleton:
             return super().__call__(
                 lock_file,
@@ -160,16 +175,10 @@ class SoftReadWriteLock(metaclass=_SoftRWMeta):
         stale_threshold: float | None = None,
         poll_interval: float = 0.25,
     ) -> None:
-        if heartbeat_interval <= 0:
-            msg = f"heartbeat_interval must be positive, got {heartbeat_interval}"
-            raise ValueError(msg)
         if stale_threshold is None:
             stale_threshold = heartbeat_interval * 3
         if stale_threshold <= heartbeat_interval:
             msg = f"stale_threshold must exceed heartbeat_interval ({stale_threshold} <= {heartbeat_interval})"
-            raise ValueError(msg)
-        if poll_interval <= 0:
-            msg = f"poll_interval must be positive, got {poll_interval}"
             raise ValueError(msg)
 
         self.lock_file: str = os.fspath(lock_file)
