@@ -384,7 +384,12 @@ def timeout_for_sqlite(timeout: float, *, blocking: bool, already_waited: float)
         msg = "timeout must be a non-negative number or -1"
         raise ValueError(msg)
 
-    timeout_ms = int((max(timeout - already_waited, 0) if timeout > 0 else timeout) * 1000)
+    remaining_timeout = max(timeout - already_waited, 0) if timeout > 0 else timeout
+    if remaining_timeout > _MAX_SQLITE_TIMEOUT_MS / 1000:
+        _LOGGER.warning("timeout %s is too large for SQLite, using %s ms instead", timeout, _MAX_SQLITE_TIMEOUT_MS)
+        return _MAX_SQLITE_TIMEOUT_MS
+
+    timeout_ms = int(remaining_timeout * 1000)
     if timeout_ms > _MAX_SQLITE_TIMEOUT_MS or timeout_ms < 0:
         _LOGGER.warning("timeout %s is too large for SQLite, using %s ms instead", timeout, _MAX_SQLITE_TIMEOUT_MS)
         return _MAX_SQLITE_TIMEOUT_MS
