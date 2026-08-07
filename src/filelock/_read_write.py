@@ -38,6 +38,22 @@ atexit.register(_cleanup_connections)
 _MAX_SQLITE_TIMEOUT_MS: Final[int] = 2_000_000_000 - 1
 
 
+def _validate_lock_options(timeout: object, blocking: object) -> tuple[float, bool]:
+    if not isinstance(blocking, bool):
+        raise TypeError(f"blocking must be a bool, not {type(blocking).__name__}")
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+        raise TypeError(f"timeout must be a finite number, not {type(timeout).__name__}")
+    try:
+        timeout = float(timeout)
+    except OverflowError as exc:
+        raise ValueError(f"timeout must be finite, not {timeout!r}") from exc
+    if not math.isfinite(timeout):
+        raise ValueError(f"timeout must be finite, not {timeout!r}")
+    if timeout < 0 and timeout != -1:
+        raise ValueError("timeout must be a non-negative number or -1")
+    return timeout, blocking
+
+
 class _ReadWriteLockMeta(type):
     """
     Resolve singleton instances for ``is_singleton=True`` construction.
@@ -58,6 +74,7 @@ class _ReadWriteLockMeta(type):
         blocking: bool = True,
         is_singleton: bool = True,
     ) -> ReadWriteLock:
+        timeout, blocking = _validate_lock_options(timeout, blocking)
         if not is_singleton:
             return super().__call__(lock_file, timeout, blocking=blocking, is_singleton=is_singleton)
 
@@ -128,6 +145,19 @@ class ReadWriteLock(metaclass=_ReadWriteLockMeta):
         blocking: bool = True,
         is_singleton: bool = True,  # noqa: ARG002  # consumed by _ReadWriteLockMeta.__call__
     ) -> None:
+        if isinstance(blocking, bool) is False:
+            raise TypeError(f"blocking must be a bool, not {type(blocking).__name__}")
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+            raise TypeError(f"timeout must be a finite number, not {type(timeout).__name__}")
+        try:
+            timeout = float(timeout)
+        except OverflowError as exc:
+            raise ValueError(f"timeout must be finite, not {timeout!r}") from exc
+        if not math.isfinite(timeout):
+            raise ValueError(f"timeout must be finite, not {timeout!r}")
+        if timeout < 0 and timeout != -1:
+            raise ValueError("timeout must be a non-negative number or -1")
+
         self.lock_file = os.fspath(lock_file)
         self.timeout = timeout
         self.blocking = blocking
@@ -269,6 +299,7 @@ class ReadWriteLock(metaclass=_ReadWriteLockMeta):
             _all_connections.discard(self._con)
 
     def _acquire(self, mode: Literal["read", "write"], timeout: float, *, blocking: bool) -> AcquireReturnProxy:
+        timeout, blocking = _validate_lock_options(timeout, blocking)
         with self._internal_lock:
             if self._lock_level > 0:
                 return self._validate_reentrant(mode)

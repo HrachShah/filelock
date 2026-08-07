@@ -79,6 +79,24 @@ def test_timeout_for_sqlite_huge_timeout_clamped() -> None:
     assert timeout_for_sqlite(3_000_000.0, blocking=True, already_waited=0.0) == _MAX_SQLITE_TIMEOUT_MS
 
 
+@pytest.mark.parametrize("blocking", [0, 1, "yes", None])
+def test_read_write_lock_rejects_non_boolean_blocking(lock_file: str, blocking: object) -> None:
+    with pytest.raises(TypeError, match="blocking must be a bool"):
+        ReadWriteLock(lock_file, blocking=blocking)
+
+
+@pytest.mark.parametrize("timeout", [True, "1", None])
+def test_read_write_lock_rejects_non_numeric_timeout(lock_file: str, timeout: object) -> None:
+    with pytest.raises(TypeError, match="timeout must be a finite number"):
+        ReadWriteLock(lock_file, timeout=timeout)
+
+
+@pytest.mark.parametrize("timeout", [math.nan, math.inf, -math.inf, -2])
+def test_read_write_lock_rejects_invalid_timeout(lock_file: str, timeout: float) -> None:
+    with pytest.raises(ValueError):
+        ReadWriteLock(lock_file, timeout=timeout)
+
+
 def test_singleton_returns_same_instance(lock_file: str) -> None:
     lock1 = ReadWriteLock(lock_file)
     lock2 = ReadWriteLock(lock_file)
