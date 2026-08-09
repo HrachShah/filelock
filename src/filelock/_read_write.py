@@ -404,6 +404,8 @@ def timeout_for_sqlite(timeout: float, *, blocking: bool, already_waited: float)
     if timeout == -1:
         return _MAX_SQLITE_TIMEOUT_MS
 
+    if not isinstance(timeout, (int, float)) or isinstance(timeout, bool):
+        raise TypeError(f"timeout must be a finite number or -1, not {type(timeout).__name__}")
     if not math.isfinite(timeout):
         msg = "timeout must be a finite number or -1"
         raise ValueError(msg)
