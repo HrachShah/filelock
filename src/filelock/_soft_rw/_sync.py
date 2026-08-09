@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import atexit
 import hmac
+import math
 import os
 import re
 import secrets
@@ -158,6 +159,18 @@ class SoftReadWriteLock(metaclass=_SoftRWMeta):
         stale_threshold: float | None = None,
         poll_interval: float = 0.25,
     ) -> None:
+        if not isinstance(blocking, bool):
+            raise TypeError(f"blocking must be a bool, not {type(blocking).__name__}")
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+            raise TypeError(f"timeout must be a finite number, not {type(timeout).__name__}")
+        try:
+            timeout = float(timeout)
+        except OverflowError as exc:
+            raise ValueError(f"timeout must be finite, not {timeout!r}") from exc
+        if not math.isfinite(timeout):
+            raise ValueError(f"timeout must be finite, not {timeout!r}")
+        if timeout < 0 and timeout != -1:
+            raise ValueError("timeout must be a non-negative number or -1")
         if heartbeat_interval <= 0:
             msg = f"heartbeat_interval must be positive, got {heartbeat_interval}"
             raise ValueError(msg)

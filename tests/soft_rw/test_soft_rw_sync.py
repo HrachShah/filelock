@@ -1101,3 +1101,16 @@ def test_write_marker_zero_write_rolls_back(lock_file: str, mocker: MockerFixtur
     with pytest.raises(OSError, match="0 bytes"):
         lock.acquire_write(timeout=1)
     assert not Path(f"{lock_file}.write").exists()
+
+
+@pytest.mark.parametrize("blocking", [0, 1, "yes", None])
+def test_rejects_non_boolean_blocking(lock_file: str, blocking: object) -> None:
+    with pytest.raises(TypeError, match="blocking must be a bool"):
+        SoftReadWriteLock(lock_file, blocking=blocking, is_singleton=False)
+
+
+@pytest.mark.parametrize("timeout", [True, "1", None, float("nan"), float("inf"), -2])
+def test_rejects_invalid_timeout(lock_file: str, timeout: object) -> None:
+    error = ValueError if isinstance(timeout, (int, float)) and not isinstance(timeout, bool) else TypeError
+    with pytest.raises(error, match="timeout must"):
+        SoftReadWriteLock(lock_file, timeout=timeout, is_singleton=False)
