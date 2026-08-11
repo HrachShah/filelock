@@ -67,6 +67,18 @@ def test_timeout_for_sqlite_positive_timeout_subtracts_waited() -> None:
     assert timeout_for_sqlite(5.0, blocking=True, already_waited=2.0) == 3000
 
 
+@pytest.mark.parametrize("already_waited", [True, "2", None])
+def test_timeout_for_sqlite_rejects_invalid_elapsed_time(already_waited: object) -> None:
+    with pytest.raises(TypeError, match="already_waited must be a finite number"):
+        timeout_for_sqlite(5.0, blocking=True, already_waited=already_waited)
+
+
+@pytest.mark.parametrize("already_waited", [math.inf, -math.inf, math.nan])
+def test_timeout_for_sqlite_rejects_non_finite_elapsed_time(already_waited: float) -> None:
+    with pytest.raises(ValueError, match="already_waited must be a finite number"):
+        timeout_for_sqlite(5.0, blocking=True, already_waited=already_waited)
+
+
 def test_timeout_for_sqlite_waited_exceeds_timeout() -> None:
     assert timeout_for_sqlite(1.0, blocking=True, already_waited=2.0) == 0
 
