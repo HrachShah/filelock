@@ -171,16 +171,33 @@ class SoftReadWriteLock(metaclass=_SoftRWMeta):
             raise ValueError(f"timeout must be finite, not {timeout!r}")
         if timeout < 0 and timeout != -1:
             raise ValueError("timeout must be a non-negative number or -1")
-        if heartbeat_interval <= 0:
-            msg = f"heartbeat_interval must be positive, got {heartbeat_interval}"
-            raise ValueError(msg)
+        for name, value in (("heartbeat_interval", heartbeat_interval), ("poll_interval", poll_interval)):
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise TypeError(f"{name} must be a finite number, not {type(value).__name__}")
+            try:
+                value = float(value)
+            except OverflowError as exc:
+                raise ValueError(f"{name} must be finite, not {value!r}") from exc
+            if not math.isfinite(value):
+                raise ValueError(f"{name} must be finite, not {value!r}")
+            if value <= 0:
+                raise ValueError(f"{name} must be positive, got {value!r}")
+            if name == "heartbeat_interval":
+                heartbeat_interval = value
+            else:
+                poll_interval = value
         if stale_threshold is None:
             stale_threshold = heartbeat_interval * 3
+        elif isinstance(stale_threshold, bool) or not isinstance(stale_threshold, (int, float)):
+            raise TypeError(f"stale_threshold must be a finite number, not {type(stale_threshold).__name__}")
+        try:
+            stale_threshold = float(stale_threshold)
+        except OverflowError as exc:
+            raise ValueError(f"stale_threshold must be finite, not {stale_threshold!r}") from exc
+        if not math.isfinite(stale_threshold):
+            raise ValueError(f"stale_threshold must be finite, not {stale_threshold!r}")
         if stale_threshold <= heartbeat_interval:
             msg = f"stale_threshold must exceed heartbeat_interval ({stale_threshold} <= {heartbeat_interval})"
-            raise ValueError(msg)
-        if poll_interval <= 0:
-            msg = f"poll_interval must be positive, got {poll_interval}"
             raise ValueError(msg)
 
         self.lock_file: str = os.fspath(lock_file)

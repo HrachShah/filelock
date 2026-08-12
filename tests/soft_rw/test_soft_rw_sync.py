@@ -64,6 +64,18 @@ def test_rejects_non_positive_poll_interval(lock_file: str) -> None:
         SoftReadWriteLock(lock_file, poll_interval=0, is_singleton=False)
 
 
+@pytest.mark.parametrize("name", ["heartbeat_interval", "stale_threshold", "poll_interval"])
+def test_rejects_non_finite_timing_options(lock_file: str, name: str) -> None:
+    with pytest.raises(ValueError, match="must be finite"):
+        SoftReadWriteLock(lock_file, **{name: float("inf")}, is_singleton=False)
+
+
+@pytest.mark.parametrize("name", ["heartbeat_interval", "stale_threshold", "poll_interval"])
+def test_rejects_boolean_timing_options(lock_file: str, name: str) -> None:
+    with pytest.raises(TypeError, match="must be a finite number"):
+        SoftReadWriteLock(lock_file, **{name: True}, is_singleton=False)
+
+
 def test_public_attributes(lock_file: str) -> None:
     lock = SoftReadWriteLock(
         lock_file,
