@@ -87,8 +87,9 @@ def test_timeout_for_sqlite_zero_timeout() -> None:
     assert timeout_for_sqlite(0.0, blocking=True, already_waited=0.0) == 0
 
 
-def test_timeout_for_sqlite_huge_timeout_clamped() -> None:
-    assert timeout_for_sqlite(3_000_000.0, blocking=True, already_waited=0.0) == _MAX_SQLITE_TIMEOUT_MS
+@pytest.mark.parametrize("timeout", [3_000_000.0, 1e308])
+def test_timeout_for_sqlite_huge_timeout_clamped(timeout: float) -> None:
+    assert timeout_for_sqlite(timeout, blocking=True, already_waited=0.0) == _MAX_SQLITE_TIMEOUT_MS
 
 
 def test_timeout_for_sqlite_rejects_non_numeric_timeout() -> None:
